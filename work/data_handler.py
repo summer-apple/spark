@@ -46,41 +46,114 @@ class DataHandler:
     def life_cycle(self,year,season):
 
         if season == 1:
-            start_year = year -1
-            end_year = year
-            t1_start_month = 9
-            t1_end_month = 12
-            t2_start_month = 1
-            t2_end_month = 3
+            #date1 当前季度月份
+            date1 = [str(year)+'-01',str(year)+'-02',str(year)+'-03']
+
+            #date2 上一季月份
+            date2 = [str(year-1) + '-10', str(year-1) + '-11', str(year-1) + '-12']
+
+        elif season == 4:
+            date1 = [str(year) + '-10', str(year) + '-11', str(year) + '-12']
+            date2 = [str(year) + '-07', str(year) + '-08', str(year) + '-9']
 
         else:
-            start_year = year
-            end_year = year
-            t1_start_month = 3 * season -5
-            t1_end_month = 3 * season -3
-            t2_start_month = 3 * season -2
-            t2_end_month = 3 * season
+            date1 = [str(year) + '-0'+str(3*season-2), str(year) + '-0'+str(3*season-1), str(year) + '-0'+str(3*season)]
+            date2 = [str(year) + '-0'+str(3*season-5), str(year) + '-0'+str(3*season-4), str(year) + '-0'+str(3*season-3)]
 
 
+        print(date1)
+        print(date2)
 
         #加载AUM表
         aum = self.load_from_mysql('t_CMMS_ASSLIB_ASSET').cache()
 
-        month_4 = aum.filter(aum.STAT_DAT == '2016-04')
-        month_5 = aum.filter(aum.STAT_DAT == '2016-05')
-        month_6 = aum.filter(aum.STAT_DAT == '2016-06')
+
+        #拼接每季度三个月断数据
+        season_new = aum.filter(aum.STAT_DAT == date1[0]).unionAll(aum.filter(aum.STAT_DAT == date1[1])).unionAll(aum.filter(aum.STAT_DAT == date1[2]))
+        season_old = aum.filter(aum.STAT_DAT == date2[0]).unionAll(aum.filter(aum.STAT_DAT == date2[1])).unionAll(aum.filter(aum.STAT_DAT == date2[2]))
+
+        #计算每季度AUM
+        aum_season_old = season_old.select('CUST_NO', season_old.AUM.alias('AUM1')).groupBy('CUST_NO').sum('AUM1')
+        aum_season_new = season_new.select('CUST_NO', season_new.AUM.alias('AUM2')).groupBy('CUST_NO').sum('AUM2')
 
 
-        season_2 = month_4.unionAll(month_5).unionAll(month_6)
+        #两个季度进行外联接
+        '''
+        +-----------+---------+---------+
+        |    CUST_NO|sum(AUM2)|sum(AUM1)|
+        +-----------+---------+---------+
+        |81005329523|     null|294844.59|
+        |81011793167|     null|   365.20|
+        |81015319088|     null|  9640.96|
+        +-----------+---------+---------+
+        '''
+        union_season = aum_season_old.join(aum_season_new,'CUST_NO','outer')
 
-        print(season_2.count())
 
 
-        season_2.select('CUST_NO','AUM').groupBy('CUST_NO').sum('AUM').show()
 
+        # 计算用户开户至今时间
+        # 载入账户表
+        self.load_from_mysql('t_CMMS_ACCOUNT_LIST').registerTempTable('account')
+
+        self.load_from_mysql('t_CMMS_ACCOUNT_LIST').registerTempTable('account')
+        account_age_aql = "select  CUST_NO, first(ACCOUNT_AGE) as ACCOUNT_AGE  from " \
+                          "(select CUST_NO, round(datediff(now(), OPEN_DAT) / 30) as ACCOUNT_AGE " \
+                          "from account order by CUST_NO, ACCOUNT_AGE desc ) as t group by CUST_NO"
+
+        account_age = self.sqlctx.sql(account_age_aql)
+
+        # 清除缓存表
+        self.sqlctx.dropTempTable('account')
+
+        union_season_account_age = union_season.join(account_age,'CUST_NO','outer')
+
+        #union_season_account_age.show()
+
+
+
+        #结果插入表
+
+        insert_lifecycle_sql = "replace into test_life_cycle(CUST_NO,SAUM1,SAUM2,INCREASE,ACCOUNT_AGE) values(%s,%s,%s,%s,%s)"
+
+        #缓冲区
+        temp = []
+        for row in union_season_account_age.collect():
+            row_dic = row.asDict()
+
+            if len(temp) >= 1000:#批量写入数据库
+                self.mysql_helper.executemany(insert_lifecycle_sql, temp)
+                temp.clear()
+
+            #加载数据到缓冲区
+
+            try:
+                increase = (row_dic['sum(AUM2)'] - row_dic['sum(AUM1)']) / row_dic['sum(AUM1)']
+            except Exception:
+                increase = 0
+
+            if row_dic['ACCOUNT_AGE'] is None:
+                row_dic['ACCOUNT_AGE'] = 7
+
+            temp.append((row_dic['CUST_NO'], row_dic['sum(AUM1)'], row_dic['sum(AUM2)'],increase,row_dic['ACCOUNT_AGE']))
+
+
+        if len(temp) != 0:
+            self.mysql_helper.executemany(insert_lifecycle_sql, temp)
+            temp.clear()
+
+
+
+
+
+
+    def test(self):
+        aum_now = "select * from (SELECT CUST_NO,STAT_DAT,sum(AUM) FROM core.t_CMMS_ASSLIB_ASSET group by CUST_NO,STAT_DAT order by CUST_NO,STAT_DAT desc) as t group by CUST_NO ;"
+        pass
 
 
 
 if __name__ == '__main__':
     dh = DataHandler()
-    dh.life_cycle(2016,2)
+    dh.life_cycle(2016, 2)
+    #dh.test()
