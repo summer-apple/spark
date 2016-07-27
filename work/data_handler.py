@@ -89,7 +89,16 @@ class DataHandler:
         '''
         union_season = aum_season_old.join(aum_season_new,'CUST_NO','outer')
 
+        # 筛选当前AUM
+        temp_result = aum.select('CUST_NO', 'AUM', 'STAT_DAT').groupBy('CUST_NO', 'STAT_DAT').sum('AUM').sort(
+            'CUST_NO').sort(aum.STAT_DAT.desc())
+        temp_result.select('CUST_NO', temp_result['sum(AUM)'].alias('AUM'), 'STAT_DAT').registerTempTable('group_in')
 
+        aum_now_sql = "select CUST_NO,first(AUM) as AUM_NOW from group_in group by CUST_NO"
+
+        aum_now = self.sqlctx.sql(aum_now_sql)
+
+        union_season_aumnow = union_season.join(aum_now,'CUST_NO','outer')
 
 
         # 计算用户开户至今时间
@@ -103,22 +112,22 @@ class DataHandler:
 
         account_age = self.sqlctx.sql(account_age_aql)
 
+
+        #联合
+        union_season_aumnow_accountage = union_season_aumnow.join(account_age,'CUST_NO','outer')
+
         # 清除缓存表
         self.sqlctx.dropTempTable('account')
-
-        union_season_account_age = union_season.join(account_age,'CUST_NO','outer')
-
-        #union_season_account_age.show()
-
+        self.sqlctx.clearCache()
 
 
         #结果插入表
 
-        insert_lifecycle_sql = "replace into test_life_cycle(CUST_NO,SAUM1,SAUM2,INCREASE,ACCOUNT_AGE) values(%s,%s,%s,%s,%s)"
+        insert_lifecycle_sql = "replace into test_life_cycle(CUST_NO,SAUM1,SAUM2,INCREASE,ACCOUNT_AGE,AUM_NOW) values(%s,%s,%s,%s,%s,%s)"
 
         #缓冲区
         temp = []
-        for row in union_season_account_age.collect():
+        for row in union_season_aumnow_accountage.collect():
             row_dic = row.asDict()
 
             if len(temp) >= 1000:#批量写入数据库
@@ -135,7 +144,7 @@ class DataHandler:
             if row_dic['ACCOUNT_AGE'] is None:
                 row_dic['ACCOUNT_AGE'] = 7
 
-            temp.append((row_dic['CUST_NO'], row_dic['sum(AUM1)'], row_dic['sum(AUM2)'],increase,row_dic['ACCOUNT_AGE']))
+            temp.append((row_dic['CUST_NO'], row_dic['sum(AUM1)'], row_dic['sum(AUM2)'],increase,row_dic['ACCOUNT_AGE'],row_dic['AUM_NOW']))
 
 
         if len(temp) != 0:
@@ -148,8 +157,12 @@ class DataHandler:
 
 
     def test(self):
-        aum_now = "select * from (SELECT CUST_NO,STAT_DAT,sum(AUM) FROM core.t_CMMS_ASSLIB_ASSET group by CUST_NO,STAT_DAT order by CUST_NO,STAT_DAT desc) as t group by CUST_NO ;"
+
+
+
         pass
+
+
 
 
 
