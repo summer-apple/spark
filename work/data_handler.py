@@ -43,7 +43,7 @@ class DataHandler:
         print(line)
 
 
-    def life_cycle(self,year,season):
+    def prepare_life_cycle(self,year,season):
 
 
 
@@ -132,7 +132,8 @@ class DataHandler:
 
         # 计算用户开户至今时间
         # 载入账户表
-        self.load_from_mysql('t_CMMS_ACCOUNT_LIST').registerTempTable('account')
+        account = self.load_from_mysql('t_CMMS_ACCOUNT_LIST').cache()
+        account.select('CUST_NO','OPEN_DAT').registerTempTable('account')
         account_age_aql = "select  CUST_NO, first(ACCOUNT_AGE) as ACCOUNT_AGE  from " \
                           "(select CUST_NO, round(datediff(now(), OPEN_DAT) / 30) as ACCOUNT_AGE " \
                           "from account order by CUST_NO, ACCOUNT_AGE desc ) as t group by CUST_NO"
@@ -140,11 +141,39 @@ class DataHandler:
         account_age = self.sqlctx.sql(account_age_aql)
 
 
-        # 联合
-        union_season_aumnow_accountage = union_season_aumnow.join(account_age,'CUST_NO','outer')
+
+
+
+
+        #calculate last tran date
+        account_1 = account.select('CUST_NO', 'ACC_NO15')
+        detail = self.load_from_mysql('t_CMMS_ACCOUNT_DETAIL').select('ACC_NO15','TRAN_DAT')
+        a_d = account_1.join(detail, 'ACC_NO15', 'outer')
+        a_d.filter(a_d.CUST_NO != '').registerTempTable('adtable')
+
+
+        last_tr_date_sql = "select CUST_NO,first(TRAN_DAT) as LAST_TR_DATE from (select CUST_NO,TRAN_DAT from adtable order by TRAN_DAT desc) as t group by CUST_NO"
+
+        last_tr_date = self.sqlctx.sql(last_tr_date_sql)
+
+
+
+
+
+
+
+
+
+
+
+
+        # 联合 season   aum_now    account_age     last_tr_date
+        unions = union_season_aumnow.join(account_age,'CUST_NO','outer').join(last_tr_date,'CUST_NO','outer')
+
 
         # 清除缓存表
         self.sqlctx.dropTempTable('account')
+        self.sqlctx.dropTempTable('adtable')
         self.sqlctx.clearCache()
 
 
@@ -159,11 +188,11 @@ class DataHandler:
 
         #结果插入表
 
-        insert_lifecycle_sql = "replace into t_CMMS_TEMP_LIFECYCLE(CUST_NO,SAUM1,SAUM2,INCREASE,ACCOUNT_AGE,AUM_NOW) values(%s,%s,%s,%s,%s,%s)"
+        insert_lifecycle_sql = "replace into t_CMMS_TEMP_LIFECYCLE(CUST_NO,SAUM1,SAUM2,INCREASE,ACCOUNT_AGE,AUM_NOW,LAST_TR_DATE) values(%s,%s,%s,%s,%s,%s,%s)"
 
         #缓冲区
         temp = []
-        for row in union_season_aumnow_accountage.collect():
+        for row in unions.collect():
             row_dic = row.asDict()
 
             if len(temp) >= 1000:#批量写入数据库
@@ -180,7 +209,22 @@ class DataHandler:
             if row_dic['ACCOUNT_AGE'] is None:
                 row_dic['ACCOUNT_AGE'] = 7
 
-            temp.append((row_dic['CUST_NO'], row_dic['sum(AUM1)'], row_dic['sum(AUM2)'],increase,row_dic['ACCOUNT_AGE'],row_dic['AUM_NOW']))
+
+            #the days since last tran
+            import datetime
+            ltd = row_dic['LAST_TR_DATE']
+            if ltd is not None:
+                try:
+                    ltd = datetime.datetime.strptime(ltd, '%Y-%m-%d')
+                except Exception:
+                    ltd = ltd[:4] + '-' + ltd[4:6] + '-' + ltd[6:]
+                    ltd = datetime.datetime.strptime(ltd, '%Y-%m-%d')
+
+                days = (datetime.datetime.now() - ltd).days
+            else:
+                days = 366
+
+            temp.append((row_dic['CUST_NO'], row_dic['sum(AUM1)'], row_dic['sum(AUM2)'],increase,row_dic['ACCOUNT_AGE'],row_dic['AUM_NOW'],days))
 
 
         if len(temp) != 0:
@@ -193,6 +237,13 @@ class DataHandler:
 
 
     def test(self):
+        account = self.load_from_mysql('t_CMMS_ACCOUNT_LIST').select('CUST_NO','ACC_NO15')#.registerTempTable('account')
+        detail = self.load_from_mysql('t_CMMS_ACCOUNT_DETAIL').select('ACC_NO15','TRAN_DAT')#.registerTempTable('detail')
+        account.join(detail,'ACC_NO15','outer').registerTempTable('adtable')
+        last_tr_date_sql = "select CUST_NO,first(TRAN_DAT) from (select CUST_NO,TRAN_DAT from adtable order by TRAN_DAT desc) as t group by CUST_NO"
+
+        last_tr_date = self.sqlctx.sql(last_tr_date_sql)
+
 
 
 
@@ -202,7 +253,48 @@ class DataHandler:
 
 
 
+
+    def calculate_life_cycle(self):
+        life_cycle = self.load_from_mysql('t_CMMS_TEMP_LIFECYCLE')
+        life_cycle.show()
+        print(life_cycle.filter(life_cycle.CUST_NO == '81079903246').collect()[0]['AUM_NOW'])
+
+
+        life_cycle = life_cycle.filter(life_cycle.AUM_NOW != None)
+
+        def clcmap(line):
+            cust_no = line['CUST_NO']
+            account_age = line['ACCOUNT_AGE']
+            last_tr_date = line['LAST_TR_DATE']
+            aum_now = line['AUM_NOW']
+            increase = line['INCREASE']
+
+            period = 0
+
+            if aum_now < 1000 and last_tr_date > 365:
+                period = 3
+            else:
+                if increase > 20 or account_age < 6:
+                    period = 0
+                elif increase >= -20 and increase <= 20:
+                    period = 1
+                else:
+                    period = 2
+
+            return cust_no, period
+
+        life_cycle.show()
+        print(life_cycle.count())
+        map_result = life_cycle.map(clcmap).collect()
+
+
+
+        print(len(map_result))
+        print(map_result)
+
+
 if __name__ == '__main__':
     dh = DataHandler()
-    dh.life_cycle(2016, 2)
+    #dh.prepare_life_cycle(2016, 2)
+    dh.calculate_life_cycle()
     #dh.test()
