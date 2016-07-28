@@ -45,6 +45,10 @@ class DataHandler:
 
     def life_cycle(self,year,season):
 
+
+
+        #计算月份
+
         if season == 1:
             #date1 当前季度月份
             date1 = [str(year)+'-01',str(year)+'-02',str(year)+'-03']
@@ -61,8 +65,17 @@ class DataHandler:
             date2 = [str(year) + '-0'+str(3*season-5), str(year) + '-0'+str(3*season-4), str(year) + '-0'+str(3*season-3)]
 
 
-        print(date1)
-        print(date2)
+        print('当前季度月份：',date1)
+        print('上一季度月份：',date2)
+
+
+
+
+
+
+
+
+
 
         #加载AUM表
         aum = self.load_from_mysql('t_CMMS_ASSLIB_ASSET').cache()
@@ -89,6 +102,12 @@ class DataHandler:
         '''
         union_season = aum_season_old.join(aum_season_new,'CUST_NO','outer')
 
+
+
+
+
+
+
         # 筛选当前AUM
         temp_result = aum.select('CUST_NO', 'AUM', 'STAT_DAT').groupBy('CUST_NO', 'STAT_DAT').sum('AUM').sort(
             'CUST_NO').sort(aum.STAT_DAT.desc())
@@ -97,14 +116,22 @@ class DataHandler:
         aum_now_sql = "select CUST_NO,first(AUM) as AUM_NOW from group_in group by CUST_NO"
 
         aum_now = self.sqlctx.sql(aum_now_sql)
+        # 清除缓存表
+        self.sqlctx.dropTempTable('group_in')
 
+        # 联合
         union_season_aumnow = union_season.join(aum_now,'CUST_NO','outer')
+
+
+
+
+
+
+
 
 
         # 计算用户开户至今时间
         # 载入账户表
-        self.load_from_mysql('t_CMMS_ACCOUNT_LIST').registerTempTable('account')
-
         self.load_from_mysql('t_CMMS_ACCOUNT_LIST').registerTempTable('account')
         account_age_aql = "select  CUST_NO, first(ACCOUNT_AGE) as ACCOUNT_AGE  from " \
                           "(select CUST_NO, round(datediff(now(), OPEN_DAT) / 30) as ACCOUNT_AGE " \
@@ -113,7 +140,7 @@ class DataHandler:
         account_age = self.sqlctx.sql(account_age_aql)
 
 
-        #联合
+        # 联合
         union_season_aumnow_accountage = union_season_aumnow.join(account_age,'CUST_NO','outer')
 
         # 清除缓存表
@@ -121,9 +148,18 @@ class DataHandler:
         self.sqlctx.clearCache()
 
 
+
+
+
+
+
+
+
+
+
         #结果插入表
 
-        insert_lifecycle_sql = "replace into test_life_cycle(CUST_NO,SAUM1,SAUM2,INCREASE,ACCOUNT_AGE,AUM_NOW) values(%s,%s,%s,%s,%s,%s)"
+        insert_lifecycle_sql = "replace into t_CMMS_TEMP_LIFECYCLE(CUST_NO,SAUM1,SAUM2,INCREASE,ACCOUNT_AGE,AUM_NOW) values(%s,%s,%s,%s,%s,%s)"
 
         #缓冲区
         temp = []
