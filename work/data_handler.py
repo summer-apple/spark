@@ -31,18 +31,21 @@ class DataHandler:
         return df
 
 
-    def split_date(self,line):
-
-        l = list(line)
-        l.append(line[0][:4])
-        l.append(line[0][5:])
-
-        return l
-
-    def print_test(self,line):
-        print(line)
 
 
+
+
+
+    '''
+    prepare data
+
+    saum1 (last season sum aum)
+    saum2 (current season sum aum)
+    aum_now
+    account_age (months)
+    last_tr_date (days)
+
+    '''
     def prepare_life_cycle(self,year,season):
 
 
@@ -65,8 +68,8 @@ class DataHandler:
             date2 = [str(year) + '-0'+str(3*season-5), str(year) + '-0'+str(3*season-4), str(year) + '-0'+str(3*season-3)]
 
 
-        print('当前季度月份：',date1)
-        print('上一季度月份：',date2)
+        print('当前季度月份 new：',date1)
+        print('上一季度月份 old：',date2)
 
 
 
@@ -130,7 +133,7 @@ class DataHandler:
 
 
 
-        # 计算用户开户至今时间
+        # 计算用户开户至今时间(months)
         # 载入账户表
         account = self.load_from_mysql('t_CMMS_ACCOUNT_LIST').cache()
         account.select('CUST_NO','OPEN_DAT').registerTempTable('account')
@@ -244,9 +247,6 @@ class DataHandler:
 
         last_tr_date = self.sqlctx.sql(last_tr_date_sql)
 
-
-
-
         pass
 
 
@@ -254,13 +254,19 @@ class DataHandler:
 
 
 
+
+
+
+
+
+
+
+
+
+    # calculate life cycle period
+
     def calculate_life_cycle(self):
-        life_cycle = self.load_from_mysql('t_CMMS_TEMP_LIFECYCLE')
-        life_cycle.show()
-        print(life_cycle.filter(life_cycle.CUST_NO == '81079903246').collect()[0]['AUM_NOW'])
-
-
-        life_cycle = life_cycle.filter(life_cycle.AUM_NOW != None)
+        life_cycle = self.load_from_mysql('t_CMMS_TEMP_LIFECYCLE').cache()
 
         def clcmap(line):
             cust_no = line['CUST_NO']
@@ -270,31 +276,44 @@ class DataHandler:
             increase = line['INCREASE']
 
             period = 0
-
-            if aum_now < 1000 and last_tr_date > 365:
-                period = 3
+            if aum_now is None:
+                period = 9  # unknown period
+            elif aum_now < 1000 and last_tr_date > 365:
+                period = 3  # lost period
             else:
                 if increase > 20 or account_age < 6:
-                    period = 0
+                    period = 0  # growing period
                 elif increase >= -20 and increase <= 20:
-                    period = 1
+                    period = 1  # grown period
                 else:
-                    period = 2
+                    period = 2 # lossing period
 
-            return cust_no, period
+            return period, cust_no
 
         life_cycle.show()
         print(life_cycle.count())
         map_result = life_cycle.map(clcmap).collect()
 
+        # clear the life_cycle cache
+        self.sqlctx.clearCache()
+
+        temp = []
+        update_life_period_sql = "update t_CMMS_TEMP_LIFECYCLE set PERIOD = %s where CUST_NO = %s"
+        for row in map_result:
+
+            if len(temp) >=1000:
+                self.mysql_helper.executemany(update_life_period_sql,temp)
+                temp.clear()
+            temp.append(row)
+
+        if len(temp) != 1000:
+            self.mysql_helper.executemany(update_life_period_sql, temp)
+            temp.clear()
 
 
-        print(len(map_result))
-        print(map_result)
 
 
 if __name__ == '__main__':
     dh = DataHandler()
-    #dh.prepare_life_cycle(2016, 2)
+    dh.prepare_life_cycle(2016, 2)
     dh.calculate_life_cycle()
-    #dh.test()
