@@ -286,7 +286,7 @@ class DataHandler:
                 elif increase >= -20 and increase <= 20:
                     period = 1  # grown period
                 else:
-                    period = 2 # lossing period
+                    period = 2 # stable period
 
             return period, cust_no
 
