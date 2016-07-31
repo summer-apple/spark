@@ -20,23 +20,23 @@ class MySQLHelper:
             print('connect fails!{}'.format(e))
 
 
-    def execute(self,sql,args):
+    def execute(self,sql,args=()):
         self.cur.execute(sql,args)
         self.cnn.commit()
 
-    def executemany(self,sql,args):
+    def executemany(self,sql,args=()):
         self.cur.executemany(sql,args)
         self.cnn.commit()
 
-    def fetchone(self,sql,args):
+    def fetchone(self,sql,args=()):
         self.cur.execute(sql, args)
         return self.cur.fetchone()
 
-    def fetchmany(self,sql,args,size=None):
+    def fetchmany(self,sql,args=(),size=None):
         self.cur.execute(sql,args)
         return self.cur.fetchmany(size)
 
-    def fetchall(self,sql,args):
+    def fetchall(self,sql,args=()):
         self.cur.execute(sql, args)
         return self.cur.fetchall()
 

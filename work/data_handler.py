@@ -9,8 +9,7 @@ except ImportError:
     from work.mysql_helper import MySQLHelper
 
 
-pydevd.settrace(""
-                "", port=8618, stdoutToServer=True, stderrToServer=True)
+#pydevd.settrace("60.191.25.130", port=8618, stdoutToServer=True, stderrToServer=True)
 
 
 
@@ -337,29 +336,32 @@ class DataHandler:
                 aum_slot_filter = aum_slot_filter.unionAll(slot_filter)
 
         # CUST_NO sum(AUM)
-        huoqi_aum = aum_slot_filter.select('CUST_NO','AUM_HQ').filter(aum_slot_filter.ASS_TYPE == '1').groupBy('CUST_NO').sum('AUM_HQ')
-        dingqi_aum = aum_slot_filter.select('CUST_NO',(aum_slot_filter.AUM * 0.8).alias('AUM_DQ')).filter(aum_slot_filter.ASS_TYPE == '2').groupBy('CUST_NO').sum('AUM_DQ')
+        huoqi_aum = aum_slot_filter.select('CUST_NO','ASS_TYPE',aum_slot_filter['AUM'].alias('AUM_HQ')).filter(aum_slot_filter.ASS_TYPE == '1').groupBy('CUST_NO').sum('AUM_HQ')
+        dingqi_aum = aum_slot_filter.select('CUST_NO','ASS_TYPE',(aum_slot_filter.AUM * 0.8).alias('AUM_DQ')).filter(aum_slot_filter.ASS_TYPE == '2').groupBy('CUST_NO').sum('AUM_DQ')
 
 
 
         #定期活期已计算好,sum(AUM_HQ),sum(AUM_DQ)
         j = huoqi_aum.join(dingqi_aum,'CUST_NO','outer')
-        j.show()
+        #j.show()
 
         #开始联合其他表
 
         if half_year == 0:#上半年 不用累加
             self.mysql_helper.execute('truncate core.t_CMMS_ANALYSE_VALUE')
+            all_col = j.join(cust_info,'CUST_NO','outer')
         else:# 下半年 需要累加上半年的数据
             value_old = self.load_from_mysql('t_CMMS_ANALYSE_VALUE').select('CUST_NO','CUST_VAL')
+            all_col = j.join(cust_info,'CUST_NO','outer').join(value_old,'CUST_NO','outer')
 
-        all_col = j.join(cust_info,'CUST_NO','outer').join(value_old,'CUST_NO','outer')
 
-        
+        #all_col.show()
+
+
 
 
         temp = []
-        update_value_sql = "replace into t_CMMS_ANALYSE_VALUE(CUST_ID,CUST_NO,CUST_NM,CUST_VAL,SLOT,UPDATE_TIME) values(%s,%s,%s,%s,%s,now())"
+        update_value_sql = "replace into test_value(CUST_ID,CUST_NO,CUST_NM,CUST_VALUE,SLOT,UPDATE_TIME) values(%s,%s,%s,%s,%s,now())"
         for row in all_col.collect():
 
             if len(temp) >= 1000:
@@ -368,14 +370,16 @@ class DataHandler:
 
             val_dq = row['sum(AUM_DQ)'] if row['sum(AUM_DQ)'] is not None else 0
             val_hq = row['sum(AUM_HQ)'] if row['sum(AUM_HQ)'] is not None else 0
-            cust_val = val_dq + val_hq
+
+            cust_val = float(val_dq) + float(val_hq)
 
             if half_year == 1:
-                val_old = row['CUST_VAL'] if row['CUST_VAL'] else 0
-                cust_val = cust_val + val_old
+                val_old = row['CUST_VAL'] if row['CUST_VAL'] is not None else 0
+                cust_val = float(cust_val) + float(val_old)
 
             slot = str(year)+'-'+str(half_year)
-            temp.append(row['CUST_ID'],row['CUST_NO'], row['CUST_NM'], cust_val, slot)
+            cust_id = row['CUST_ID'] if row['CUST_ID'] is not  None else 1
+            temp.append((cust_id,row['CUST_NO'], row['CUST_NAM'], cust_val, slot))
 
         if len(temp) != 1000:
             self.mysql_helper.executemany(update_value_sql, temp)
@@ -386,5 +390,10 @@ class DataHandler:
 
 if __name__ == '__main__':
     dh = DataHandler()
-    dh.prepare_life_cycle(2016, 2)
-    dh.calculate_life_cycle()
+
+    #生命周期 年份 季度
+    # dh.prepare_life_cycle(2016, 2)
+    # dh.calculate_life_cycle()
+
+
+    dh.customer_rank(2016,0)
