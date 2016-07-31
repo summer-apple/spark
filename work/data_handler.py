@@ -9,7 +9,8 @@ except ImportError:
     from work.mysql_helper import MySQLHelper
 
 
-pydevd.settrace("60.191.25.130", port=8618, stdoutToServer=True, stderrToServer=True)
+pydevd.settrace(""
+                "", port=8618, stdoutToServer=True, stderrToServer=True)
 
 
 
@@ -308,6 +309,76 @@ class DataHandler:
 
         if len(temp) != 1000:
             self.mysql_helper.executemany(update_life_period_sql, temp)
+            temp.clear()
+
+
+
+    def customer_rank(self,year,half_year):
+
+        cust_info = self.load_from_mysql('t_CMMS_INFO_CUSTOMER').select('CUST_NO','CUST_ID','CUST_NAM').cache()
+        aum = self.load_from_mysql('t_CMMS_ASSLIB_ASSET').select('CUST_NO','STAT_DAT','AUM','ASS_TYPE').cache()
+
+        base = half_year * 6
+
+        aum_slot_filter = None
+
+        for i in range(1,7):
+            i = base + i
+            if i < 10:
+                i = '0'+str(i)
+            else:
+                i = str(i)
+            slot = str(year) + '-' + i
+
+            slot_filter = aum.filter(aum.STAT_DAT == slot)
+            if aum_slot_filter is None:
+                aum_slot_filter = slot_filter
+            else:
+                aum_slot_filter = aum_slot_filter.unionAll(slot_filter)
+
+        # CUST_NO sum(AUM)
+        huoqi_aum = aum_slot_filter.select('CUST_NO','AUM_HQ').filter(aum_slot_filter.ASS_TYPE == '1').groupBy('CUST_NO').sum('AUM_HQ')
+        dingqi_aum = aum_slot_filter.select('CUST_NO',(aum_slot_filter.AUM * 0.8).alias('AUM_DQ')).filter(aum_slot_filter.ASS_TYPE == '2').groupBy('CUST_NO').sum('AUM_DQ')
+
+
+
+        #定期活期已计算好,sum(AUM_HQ),sum(AUM_DQ)
+        j = huoqi_aum.join(dingqi_aum,'CUST_NO','outer')
+        j.show()
+
+        #开始联合其他表
+
+        if half_year == 0:#上半年 不用累加
+            self.mysql_helper.execute('truncate core.t_CMMS_ANALYSE_VALUE')
+        else:# 下半年 需要累加上半年的数据
+            value_old = self.load_from_mysql('t_CMMS_ANALYSE_VALUE').select('CUST_NO','CUST_VAL')
+
+        all_col = j.join(cust_info,'CUST_NO','outer').join(value_old,'CUST_NO','outer')
+
+        
+
+
+        temp = []
+        update_value_sql = "replace into t_CMMS_ANALYSE_VALUE(CUST_ID,CUST_NO,CUST_NM,CUST_VAL,SLOT,UPDATE_TIME) values(%s,%s,%s,%s,%s,now())"
+        for row in all_col.collect():
+
+            if len(temp) >= 1000:
+                self.mysql_helper.executemany(update_value_sql,temp)
+                temp.clear()
+
+            val_dq = row['sum(AUM_DQ)'] if row['sum(AUM_DQ)'] is not None else 0
+            val_hq = row['sum(AUM_HQ)'] if row['sum(AUM_HQ)'] is not None else 0
+            cust_val = val_dq + val_hq
+
+            if half_year == 1:
+                val_old = row['CUST_VAL'] if row['CUST_VAL'] else 0
+                cust_val = cust_val + val_old
+
+            slot = str(year)+'-'+str(half_year)
+            temp.append(row['CUST_ID'],row['CUST_NO'], row['CUST_NM'], cust_val, slot)
+
+        if len(temp) != 1000:
+            self.mysql_helper.executemany(update_value_sql, temp)
             temp.clear()
 
 
