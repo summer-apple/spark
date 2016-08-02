@@ -1,7 +1,8 @@
 import pydevd
 from pyspark import SparkContext,SparkConf,SQLContext
 from pyspark.mllib.fpm import FPGrowth,PrefixSpan
-
+from pyspark.mllib.clustering import KMeans,KMeansModel
+import math
 
 pydevd.settrace("60.191.25.130", port=8618, stdoutToServer=True, stderrToServer=True)
 
@@ -23,7 +24,7 @@ class Recommend:
 
 
 
-    def test(self):
+    def gp_growth_demo(self):
 
         '''
         r z h k p
@@ -41,26 +42,16 @@ class Recommend:
         for fi in result:
             print(fi)
 
-    def test2(self):
-        data = [
-            ['A', 'B', 'C'],
-            ['A', 'B', 'D'],
-            ['A', 'G', 'C'],
-            ['A', 'B', 'R'],
-            ['H', 'J', 'K']
-
-        ]
-        data2 = [1,2,3,4,5,3,2,3,21,4,5,4,5]
-        rdd = self.sc.parallelize(data2, 2).cache()
-        model = FPGrowth.train(rdd, minSupport=0.3, numPartitions=10)
-        result = model.freqItemsets().collect()
-        for r in result:
-            print(r)
 
 
-    def test3(self):
+
+    def fpgrowth(self):
         '''
         frequent mining
+
+        1.get the group of similar customers
+        2.list the products these customers using
+        3.run this fpgroup
         :return:
         '''
 
@@ -81,10 +72,85 @@ class Recommend:
 
 
 
+    def kmeans_demo(self):
+
+        file = self.sc.textFile(self.base+'kmeans_test_data.txt')
+
+        # transform to rdd
+        data = file.map(lambda line: line.split(' ')).cache()
+
+        # train data to get the model
+        model = KMeans.train(data,k=3)
+
+        # print to check all clusters
+        cluster = model.clusterCenters
+        for c in cluster:
+            print(c)
+
+
+        # predict new data  return the data belong to which cluster(index of the cluster)
+        predict = model.predict([1.3,.1,1.1])
+
+        print(predict)
+
+
+    # calculate the distance of data point to cluster center
+    # @staticmethod
+    # def distance(v1,v2):
+    #     sum = 0
+    #     for a, b in v1, v2:
+    #         sum = sum + (a-b)*(a-b)
+    #
+    #     return math.sqtr(sum)
+
+
+    # the distance to
+    # @staticmethod
+    # def dist_to_centroid(datum,model):
+    #     # predict the data
+    #     cluster = model.predict(datum)
+    #     # get the current centroid --> means center point
+    #     centroid = model.clusterCenters(cluster)
+    #     # call distance method
+    #     self.distance(centroid,datum)
+
+    @staticmethod
+    def clustering_score(data,k):
+        model = KMeans.train(data, k=k,maxIterations=200)
+
+        def distance(v1, v2):
+            s = 0
+            pairs = zip(v1,v2)
+            lst = list(pairs)
+            for p in lst:
+                sub = float(p[0]) - float(p[1])
+                s = s + sub * sub
+            return math.sqrt(s)
+
+        def dist_to_centroid(datum):
+            # predict the data
+            cluster = model.predict(datum)
+            # get the current centroid --> means center point
+            centroid = model.clusterCenters[cluster]
+            # call distance method
+            return distance(centroid, datum)
+
+        return data.map(dist_to_centroid).mean()
+
+
+
+    def try_k(self):
+        file = self.sc.textFile(self.base + 'k_data.csv')
+        data = file.map(lambda line: line.split(',')).cache()
+        print(data.count())
+        for k in range(100,200):
+            sorce = self.clustering_score(data,k)
+            print(k,sorce)
+
 
 if __name__ == '__main__':
     r = Recommend()
-    r.test3()
+    r.try_k()
 
 
 
