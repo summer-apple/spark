@@ -36,18 +36,21 @@ class DataHandler:
 
 
 
-    '''
-    prepare data
 
-    saum1 (last season sum aum)
-    saum2 (current season sum aum)
-    aum_now
-    account_age (months)
-    last_tr_date (days)
-
-    '''
     def prepare_life_cycle(self,year,season):
+        '''
+        prepare data
 
+        saum1 (last season sum aum)
+        saum2 (current season sum aum)
+        aum_now
+        account_age (months)
+        last_tr_date (days)
+
+        :param year:
+        :param season: 1,2,3,4
+        :return:
+        '''
 
 
         #计算月份
@@ -70,11 +73,6 @@ class DataHandler:
 
         print('当前季度月份 new：',date1)
         print('上一季度月份 old：',date2)
-
-
-
-
-
 
 
 
@@ -236,18 +234,8 @@ class DataHandler:
 
 
 
-
-
-
-    def test(self):
-        account = self.load_from_mysql('t_CMMS_ACCOUNT_LIST').select('CUST_NO','ACC_NO15')#.registerTempTable('account')
-        detail = self.load_from_mysql('t_CMMS_ACCOUNT_DETAIL').select('ACC_NO15','TRAN_DAT')#.registerTempTable('detail')
-        account.join(detail,'ACC_NO15','outer').registerTempTable('adtable')
-        last_tr_date_sql = "select CUST_NO,first(TRAN_DAT) from (select CUST_NO,TRAN_DAT from adtable order by TRAN_DAT desc) as t group by CUST_NO"
-
-        last_tr_date = self.sqlctx.sql(last_tr_date_sql)
-
-        pass
+        self.calculate_life_cycle()
+        self.put_to_real_table(year,season)
 
 
 
@@ -255,17 +243,15 @@ class DataHandler:
 
 
 
-
-
-
-
-
-
-
-
-    # calculate life cycle period
 
     def calculate_life_cycle(self):
+
+        '''
+        calculate life cycle period
+        :return:
+        '''
+
+
         life_cycle = self.load_from_mysql('t_CMMS_TEMP_LIFECYCLE').cache()
 
         def clcmap(line):
@@ -312,7 +298,55 @@ class DataHandler:
 
 
 
-    def customer_rank(self,year,half_year):
+
+
+    def put_to_real_table(self,year,season):
+        '''
+        put life_cycle tmp table to real table
+        :return:
+        '''
+
+
+        life_cycle = self.load_from_mysql('t_CMMS_TEMP_LIFECYCLE').select('CUST_NO','PERIOD')
+        cust_info = self.load_from_mysql('t_CMMS_INFO_CUSTOMER').select('CUST_NO','CUST_ID','CUST_NAM')
+
+        union = life_cycle.join(cust_info,'CUST_NO','left_outer').cache()
+
+        temp = []
+        sql = "replace into t_CMMS_ANALYSE_LIFE(CUST_NO,CUST_ID,CUST_NM,LIFE_CYC,QUARTER,UPDATE_TIME) values(%s,%s,%s,%s,%s,now())"
+        for row in union.collect():
+
+            if len(temp) >= 1000:
+                self.mysql_helper.executemany(sql, temp)
+                temp.clear()
+            quarter = str(year) + '-' + str(season)
+
+            cust_id = row['CUST_ID'] if row['CUST_ID'] is not None else '0'
+            temp.append((row['CUST_NO'],cust_id,row['CUST_NAM'],row['PERIOD'],quarter))
+
+        if len(temp) != 1000:
+            self.mysql_helper.executemany(sql, temp)
+            temp.clear()
+
+        self.sqlctx.clearCache()
+
+
+
+
+
+
+
+
+
+
+
+    def customer_value(self,year,half_year):
+        '''
+        calculate customer value
+        :param year: which year to calculate
+        :param half_year: 0 for month 1-6 , 1 for month 7-12
+        :return:
+        '''
 
         cust_info = self.load_from_mysql('t_CMMS_INFO_CUSTOMER').select('CUST_NO','CUST_ID','CUST_NAM').cache()
         aum = self.load_from_mysql('t_CMMS_ASSLIB_ASSET').select('CUST_NO','STAT_DAT','AUM','ASS_TYPE').cache()
@@ -345,23 +379,22 @@ class DataHandler:
         j = huoqi_aum.join(dingqi_aum,'CUST_NO','outer')
         #j.show()
 
-        #开始联合其他表
 
-        if half_year == 0:#上半年 不用累加
-            self.mysql_helper.execute('truncate core.t_CMMS_ANALYSE_VALUE')
-            all_col = j.join(cust_info,'CUST_NO','outer')
-        else:# 下半年 需要累加上半年的数据
-            value_old = self.load_from_mysql('t_CMMS_ANALYSE_VALUE').select('CUST_NO','CUST_VAL')
-            all_col = j.join(cust_info,'CUST_NO','outer').join(value_old,'CUST_NO','outer')
+        # clear old data
+        self.mysql_helper.execute('truncate core.t_CMMS_ANALYSE_VALUE')
+
+        # 开始联合其他表
+        all_col = j.join(cust_info,'CUST_NO','outer')
 
 
+        print(j.count(),cust_info.count())
         #all_col.show()
 
 
 
 
         temp = []
-        update_value_sql = "replace into test_value(CUST_ID,CUST_NO,CUST_NM,CUST_VALUE,SLOT,UPDATE_TIME) values(%s,%s,%s,%s,%s,now())"
+        update_value_sql = "replace into t_CMMS_ANALYSE_VALUE(CUST_ID,CUST_NO,CUST_NM,CUST_VALUE,SLOT,UPDATE_TIME) values(%s,%s,%s,%s,%s,now())"
         for row in all_col.collect():
 
             if len(temp) >= 1000:
@@ -392,8 +425,8 @@ if __name__ == '__main__':
     dh = DataHandler()
 
     #生命周期 年份 季度
-    # dh.prepare_life_cycle(2016, 2)
-    # dh.calculate_life_cycle()
+    #dh.prepare_life_cycle(2016, 2)
 
+    dh.put_to_real_table(2016, 2)
 
-    dh.customer_rank(2016,0)
+    #dh.customer_value(2016,0)
