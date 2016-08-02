@@ -31,9 +31,18 @@ class KMAnalyse:
         value = self.load_from_mysql('t_CMMS_ANALYSE_VALUE').select('CUST_NO','CUST_VALUE')
         loyalty = self.load_from_mysql('t_CMMS_ANALYSE_LOYALTY').select('CUST_NO','LOYALTY')
 
-        rfm = loyalty.join(value,'CUST_NO','left_outer').join(life_cycle,'CUST_NO','left_outer')
+        rfm = loyalty.join(value,'CUST_NO','left_outer').join(life_cycle,'CUST_NO','left_outer').rdd
 
-        return rfm.rdd
+        def v_map(line):
+            lst = []
+            for c in line:
+                if c is not None:
+                    lst.append(float(c))
+                else:
+                    lst.append(0.0)
+            return lst
+
+        return rfm.map(v_map)
 
     @staticmethod
     def clustering_score(data, k):
@@ -62,32 +71,24 @@ class KMAnalyse:
         #file = self.sc.textFile(self.base + 'k_data.csv')
         #data = file.map(lambda line: line.split(',')).cache()
         data = self.perpare_data()
-
-        def v_map(line):
-            lst = []
-            for c in line:
-                if c is not None:
-                    lst.append(float(c))
-                else:
-                    lst.append(0.0)
-            return lst
-        data = data.map(v_map)
-
-        print(type(data))
         for k in range(1, 100):
             sorce = self.clustering_score(data, k)
             print(k, sorce)
 
 
 
-
+    def predict(self):
+        data = self.perpare_data()
+        model = KMeans.train(data,k=5)
+        for c in model.clusterCenters:
+            print(c)
 
 
 
 if __name__ == '__main__':
     kma = KMAnalyse()
 
-    kma.try_k()
+    kma.predict()
 
 
 
