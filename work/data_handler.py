@@ -391,10 +391,25 @@ class DataHandler:
         #all_col.show()
 
 
+        def calculate_rank(value):
+            if value < 1000:
+                return 0
+            elif value < 10000:
+                return 1
+            elif value < 100000:
+                return 2
+            elif value < 500000:
+                return 3
+            elif value < 2000000:
+                return 4
+            elif value < 5000000:
+                return 5
+            else:
+                return 6
 
 
         temp = []
-        update_value_sql = "replace into t_CMMS_ANALYSE_VALUE(CUST_ID,CUST_NO,CUST_NM,CUST_VALUE,SLOT,UPDATE_TIME) values(%s,%s,%s,%s,%s,now())"
+        update_value_sql = "replace into t_CMMS_ANALYSE_VALUE(CUST_ID,CUST_NO,CUST_NM,CUST_VALUE,CUST_RANK,SLOT,UPDATE_TIME) values(%s,%s,%s,%s,%s,%s,now())"
         for row in all_col.collect():
 
             if len(temp) >= 1000:
@@ -406,17 +421,19 @@ class DataHandler:
 
             cust_val = float(val_dq) + float(val_hq)
 
-            if half_year == 1:
-                val_old = row['CUST_VAL'] if row['CUST_VAL'] is not None else 0
-                cust_val = float(cust_val) + float(val_old)
+            cust_rank = calculate_rank(cust_val)
 
             slot = str(year)+'-'+str(half_year)
             cust_id = row['CUST_ID'] if row['CUST_ID'] is not  None else 1
-            temp.append((cust_id,row['CUST_NO'], row['CUST_NAM'], cust_val, slot))
+            temp.append((cust_id,row['CUST_NO'], row['CUST_NAM'], cust_val, cust_rank, slot))
 
         if len(temp) != 1000:
             self.mysql_helper.executemany(update_value_sql, temp)
             temp.clear()
+
+
+
+
 
 
 
@@ -427,6 +444,6 @@ if __name__ == '__main__':
     #生命周期 年份 季度
     #dh.prepare_life_cycle(2016, 2)
 
-    dh.put_to_real_table(2016, 2)
+    #dh.put_to_real_table(2016, 2)
 
-    #dh.customer_value(2016,0)
+    dh.customer_value(2016,0)
