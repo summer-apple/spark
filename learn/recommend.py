@@ -74,10 +74,11 @@ class Recommend:
 
     def kmeans_demo(self):
 
-        file = self.sc.textFile(self.base+'kmeans_test_data.txt')
+        file = self.sc.textFile(self.base+'k_data.csv')
 
         # transform to rdd
-        data = file.map(lambda line: line.split(' ')).cache()
+        data = file.map(lambda line: line.split(',')).cache()
+        print(type(data))
 
         # train data to get the model
         model = KMeans.train(data,k=3)
@@ -120,9 +121,9 @@ class Recommend:
 
         def distance(v1, v2):
             s = 0
+            # [1,2,3] [4,5,6] --> [(1,4),(2,5),(3,6)]
             pairs = zip(v1,v2)
-            lst = list(pairs)
-            for p in lst:
+            for p in pairs:
                 sub = float(p[0]) - float(p[1])
                 s = s + sub * sub
             return math.sqrt(s)
@@ -150,7 +151,9 @@ class Recommend:
 
 if __name__ == '__main__':
     r = Recommend()
-    r.try_k()
+    #r.try_k()
+
+    r.kmeans_demo()
 
 
 

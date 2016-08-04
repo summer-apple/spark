@@ -9,7 +9,7 @@ except ImportError:
     from work.mysql_helper import MySQLHelper
 
 
-#pydevd.settrace("60.191.25.130", port=8618, stdoutToServer=True, stderrToServer=True)
+pydevd.settrace("60.191.25.130", port=8618, stdoutToServer=True, stderrToServer=True)
 
 
 
@@ -435,7 +435,60 @@ class DataHandler:
 
 
 
+    def aum_total(self):
+        '''
+        data for t_CMMS_ASSLIB_ASSTOT
+        :return:
+        '''
+        df_asset = self.load_from_mysql('t_CMMS_ASSLIB_ASSET').select('CUST_NO','CUST_ID','STAT_DAT','AUM','CUR', 'ACC_NAM').cache()
+        aum = df_asset.select('CUST_NO', 'STAT_DAT', 'AUM')
+        other_col = df_asset.select('CUST_NO','CUST_ID','CUR','ACC_NAM')
 
+        aum = aum.select('CUST_NO','STAT_DAT','AUM').groupBy(['CUST_NO','STAT_DAT']).sum('AUM').sort(['CUST_NO',aum.STAT_DAT.desc()])\
+            .groupBy('CUST_NO').agg({'sum(AUM)':'first','STAT_DAT':'first'})
+
+        total = aum.select('CUST_NO',aum['first(sum(AUM))'].alias('AUM'),aum['first(STAT_DAT)'].alias('STAT_DAT')).\
+            join(other_col,'CUST_NO','leftsemi')
+
+        print(total.count())
+
+        # prepare params
+        def list_map(line):
+            return line['CUST_ID'],line['CUST_NO'],line['ACC_NAM'],line['STAT_DAT'],line['CUR'],line['AUM']
+        df = total.map(list_map)
+
+        #clear old data
+        self.mysql_helper.execute('truncate t_CMMS_ASSLIB_ASSTOT')
+        sql = "insert into t_CMMS_ASSLIB_ASSTOT(CUST_ID,CUST_NO,ACC_NAM,STAT_DAT,CUR,AUM) values(%s,%s,%s,%s,%s,%s)"
+
+        # execute sql
+        #self.sql_operate(sql, df, 500)
+
+        temp = []
+        for row in df.collect():
+            if len(temp) >= 1000:
+                self.mysql_helper.executemany(sql, temp)
+                temp.clear()
+            print(row)
+            temp.append(row)
+
+        if len(temp) != 1000:
+            self.mysql_helper.executemany(sql, temp)
+            temp.clear()
+
+
+
+    def sql_operate(self,sql,df,once_size=1000):
+        temp = []
+        for row in df.collect():
+            if len(temp) >= once_size:
+                self.mysql_helper.executemany(sql, temp)
+                temp.clear()
+            temp.append(row)
+
+        if len(temp) != once_size:
+            self.mysql_helper.executemany(sql, temp)
+            temp.clear()
 
 
 if __name__ == '__main__':
@@ -446,4 +499,7 @@ if __name__ == '__main__':
 
     #dh.put_to_real_table(2016, 2)
 
-    dh.customer_value(2016,0)
+    #dh.customer_value(2016,0)
+
+
+    dh.aum_total()
