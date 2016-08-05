@@ -11,7 +11,7 @@ except ImportError:
     from work.mysql_helper import MySQLHelper
 
 
-pydevd.settrace("60.191.25.130", port=8618, stdoutToServer=True, stderrToServer=True)
+#pydevd.settrace("60.191.25.130", port=8618, stdoutToServer=True, stderrToServer=True)
 
 
 
@@ -64,7 +64,7 @@ class KMAnalyse:
 
         get_id_sql = "select ID from t_CMMS_TEMP_KMEANS_RESULT order by ID desc limit 1"
         try:
-            id = int(self.mysql_helper.fetchone(get_id_sql)) + 1
+            id = int(self.mysql_helper.fetchone(get_id_sql)[0]) + 1
         except:
             id = 1
         columns = str(dataframe.columns)
@@ -184,10 +184,14 @@ class KMAnalyse:
         return rfm
 
 
+    def test_1(self):
+        return self.load_from_mysql('t_CMMS_TEMP_KMEANS_COLUMNS').select('LIFE_CYC','LOYALTY','CUST_RANK','AGE','LOCAL','SEX','AUM')
+
+
 if __name__ == '__main__':
     kma = KMAnalyse()
-    df = kma.test_data()
-    #kma.try_different_k(df,15)
+    df = kma.test_1()
+    kma.try_different_k(df,15)
     #kma.train_model(df, 5, 'rmf_kmeans')
     #kma.predict('rmf_kmeans',[2.28426396e-02, 2.57216490e+05, 1.32690355e+00])
 

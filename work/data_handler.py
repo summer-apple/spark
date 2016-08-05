@@ -1,6 +1,6 @@
 import pydevd
 from pyspark import SparkContext,SparkConf,SQLContext
-
+import datetime
 try:
     from mysql_helper import MySQLHelper
 except ImportError:
@@ -212,7 +212,6 @@ class DataHandler:
 
 
             #the days since last tran
-            import datetime
             ltd = row_dic['LAST_TR_DATE']
             if ltd is not None:
                 try:
@@ -441,16 +440,23 @@ class DataHandler:
         :return:
         '''
         df_asset = self.load_from_mysql('t_CMMS_ASSLIB_ASSET').select('CUST_NO','CUST_ID','STAT_DAT','AUM','CUR', 'ACC_NAM').cache()
+        #print(df_asset.count(), df_asset.columns)
+
+        other_col = df_asset.select('CUST_NO','CUST_ID','CUR','ACC_NAM').distinct()
+        #print(other_col.count(),other_col.columns)
+
         aum = df_asset.select('CUST_NO', 'STAT_DAT', 'AUM')
-        other_col = df_asset.select('CUST_NO','CUST_ID','CUR','ACC_NAM')
+        #print(aum.count(), aum.columns)
 
         aum = aum.select('CUST_NO','STAT_DAT','AUM').groupBy(['CUST_NO','STAT_DAT']).sum('AUM').sort(['CUST_NO',aum.STAT_DAT.desc()])\
             .groupBy('CUST_NO').agg({'sum(AUM)':'first','STAT_DAT':'first'})
+        #print(aum.count(), aum.columns)
+
 
         total = aum.select('CUST_NO',aum['first(sum(AUM))'].alias('AUM'),aum['first(STAT_DAT)'].alias('STAT_DAT')).\
-            join(other_col,'CUST_NO','leftsemi')
+            join(other_col,'CUST_NO','left_outer').distinct()
 
-        print(total.count())
+        #total.filter(total.STAT_DAT == '2016-06-') .show()
 
         # prepare params
         def list_map(line):
@@ -462,33 +468,61 @@ class DataHandler:
         sql = "insert into t_CMMS_ASSLIB_ASSTOT(CUST_ID,CUST_NO,ACC_NAM,STAT_DAT,CUR,AUM) values(%s,%s,%s,%s,%s,%s)"
 
         # execute sql
-        #self.sql_operate(sql, df, 500)
+        self.sql_operate(sql, df, 100)
 
-        temp = []
-        for row in df.collect():
-            if len(temp) >= 1000:
-                self.mysql_helper.executemany(sql, temp)
-                temp.clear()
-            print(row)
-            temp.append(row)
 
-        if len(temp) != 1000:
-            self.mysql_helper.executemany(sql, temp)
-            temp.clear()
+
+
+
+
+    def debt_total(self):
+        df_debt = self.load_from_mysql('t_CMMS_ASSLIB_DEBT').select('LOAN_ACC','CUST_NO','CUST_ID','CUST_NAM','BAL_AMT','GRANT_AMT','CUR')
+        df_debt = df_debt.filter(df_debt.LOAN_ACC != '')
+
+        df_sum = df_debt.groupBy('CUST_NO').sum('GRANT_AMT','BAL_AMT')
+        df_other = df_debt.groupBy('CUST_NO').agg({'CUST_ID':'first','CUST_NAM':'first','CUR':'first'})
+
+        df_total = df_sum.join(df_other,'CUST_NO','left_outer').distinct()
+
+        stat_dat = datetime.datetime.now().strftime('%Y%m%d')
+
+        def m(line):
+            return line['CUST_NO'],line['first(CUST_ID)'],line['first(CUST_NAM)'],line['first(CUR)'],line['sum(GRANT_AMT)'],line['sum(BAL_AMT)'],stat_dat
+
+        df = df_total.map(m)
+
+        for d in df.collect():
+            print(d)
+
+        sql = "replace into t_CMMS_ASSLIB_DEBTOT(CUST_NO,CUST_ID,ACC_NAM,CUR,LOAN_AMT,BAL_AMT,STAT_DAT) values(%s,%s,%s,%s,%s,%s,%s)"
+
+        self.sql_operate(sql,df)
+
+
 
 
 
     def sql_operate(self,sql,df,once_size=1000):
         temp = []
         for row in df.collect():
+            print(row)
             if len(temp) >= once_size:
                 self.mysql_helper.executemany(sql, temp)
                 temp.clear()
             temp.append(row)
 
-        if len(temp) != once_size:
+        if len(temp) != 0:
             self.mysql_helper.executemany(sql, temp)
             temp.clear()
+
+
+    def test(self):
+        df_asset = self.load_from_mysql('t_CMMS_ASSLIB_ASSET').select('CUST_NO', 'CUST_ID', 'STAT_DAT', 'AUM', 'CUR',
+                                                                      'ACC_NAM').cache()
+        other_col1 = df_asset.select('CUST_NO', 'CUST_ID', 'CUR', 'ACC_NAM').groupBy('CUST_NO').agg(
+            {'CUST_NO': 'first', 'CUST_ID': 'first', 'CUR': 'first', 'ACC_NAM': 'first'})
+        other_col2 = df_asset.select('CUST_NO', 'CUST_ID', 'CUR', 'ACC_NAM').distinct()
+        print(other_col1.count(), other_col2.count())
 
 
 if __name__ == '__main__':
@@ -502,4 +536,6 @@ if __name__ == '__main__':
     #dh.customer_value(2016,0)
 
 
-    dh.aum_total()
+    #dh.aum_total()
+    dh.debt_total()
+    #dh.test()

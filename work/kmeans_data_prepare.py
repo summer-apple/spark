@@ -122,12 +122,33 @@ class KMData:
 
 
 
+    def aum(self):
+        kcolums = self.load_from_mysql('t_CMMS_TEMP_KMEANS_COLUMNS').select('CUST_NO')
+        aum = self.load_from_mysql('t_CMMS_ASSLIB_ASSTOT').select('CUST_NO','AUM')
+        j = kcolums.join(aum,'CUST_NO','left_outer').distinct()
+
+        def m(line):
+            aum = line['AUM'] if line['AUM'] is not None else 0
+            return aum,line['CUST_NO']
+
+        df = j.map(m)
+        sql = "update t_CMMS_TEMP_KMEANS_COLUMNS set AUM = %s where CUST_NO = %s"
+        self.sql_operate(sql,df)
 
 
+    def sql_operate(self, sql, df, once_size=1000):
+        temp = []
+        for row in df.collect():
+            if len(temp) >= once_size:
+                self.mysql_helper.executemany(sql, temp)
+                temp.clear()
+            temp.append(row)
 
-
+        if len(temp) != 0:
+            self.mysql_helper.executemany(sql, temp)
+            temp.clear()
 
 if __name__ == '__main__':
     kmdata = KMData()
 
-    kmdata.idcard()
+    kmdata.aum()
