@@ -1,17 +1,19 @@
 import pydevd
-from pyspark import SparkContext,SparkConf,SQLContext
-from pyspark.mllib.clustering import KMeans,KMeansModel
+from pyspark import SparkContext, SparkConf, SQLContext
+from pyspark.mllib.clustering import KMeans, KMeansModel
 from pyspark.mllib.linalg import Vectors
 import math
+
 try:
     from mysql_helper import MySQLHelper
 except ImportError:
-    import sys,os
+    import sys, os
+
     sys.path.append(os.path.abspath('../'))
     from work.mysql_helper import MySQLHelper
 
 
-#pydevd.settrace("60.191.25.130", port=8618, stdoutToServer=True, stderrToServer=True)
+# pydevd.settrace("60.191.25.130", port=8618, stdoutToServer=True, stderrToServer=True)
 
 
 
@@ -26,13 +28,10 @@ class KMAnalyse:
         self.mysql_helper = MySQLHelper('core', host='10.9.29.212')
         self.base = 'hdfs://master:9000/gmc/'
 
-
     def load_from_mysql(self, table, database='core'):
         url = "jdbc:mysql://10.9.29.212:3306/%s?user=root&characterEncoding=UTF-8" % database
         df = self.sqlctx.read.format("jdbc").options(url=url, dbtable=table, driver="com.mysql.jdbc.Driver").load()
         return df
-
-
 
     @staticmethod
     def clustering_score(data, k):
@@ -57,9 +56,7 @@ class KMAnalyse:
 
         return data.map(dist_to_centroid).mean()
 
-
-
-    def try_different_k(self,dataframe,stop,start=2):
+    def try_different_k(self, dataframe, stop, start=2):
         data = self.prepare_data(dataframe)
 
         get_id_sql = "select ID from t_CMMS_TEMP_KMEANS_RESULT order by ID desc limit 1"
@@ -72,10 +69,10 @@ class KMAnalyse:
         for k in range(start, stop):
             sorce = self.clustering_score(data, k)
             print(k, sorce)
-            self.mysql_helper.execute('insert into t_CMMS_TEMP_KMEANS_RESULT(ID,K,SORCE,COLUMNS) values(%s,%s,%s,%s)', (id,k, sorce,columns))
+            #self.mysql_helper.execute('insert into t_CMMS_TEMP_KMEANS_RESULT(ID,K,SORCE,COLUMNS) values(%s,%s,%s,%s)',
+                                      (id, k, sorce, columns))
 
-
-    def prepare_data(self,dataframe):
+    def prepare_data(self, dataframe):
         '''
         format data
         :param dataframe:
@@ -93,9 +90,7 @@ class KMAnalyse:
 
         return dataframe.rdd.cache().map(v_map)
 
-
-
-    def train_model(self,dataframe,k,model_name):
+    def train_model(self, dataframe, k, model_name):
         '''
         use data to train model
         :param dataframe: all columns for train
@@ -106,13 +101,13 @@ class KMAnalyse:
 
         data = self.prepare_data(dataframe)
 
-        #train to get model
-        model = KMeans.train(data,k)
+        # train to get model
+        model = KMeans.train(data, k)
 
-        #create model saving path
+        # create model saving path
         path = self.base + model_name
 
-        #try to delete the old model if it exists
+        # try to delete the old model if it exists
         try:
             import subprocess
             subprocess.call(["hadoop", "fs", "-rm", "-f", path])
@@ -121,13 +116,11 @@ class KMAnalyse:
         # save new model on hdfs
         model.save(self.sc, path)
 
-        #print all cluster of the model
+        # print all cluster of the model
         for c in model.clusterCenters:
             print(c)
 
-
-
-    def predict(self,model_name,data):
+    def predict(self, model_name, data):
 
         '''
         predict unknown data
@@ -143,14 +136,12 @@ class KMAnalyse:
         except:
             raise Exception('No such model found on hdfs!')
 
-        #get the predict : means which cluster it belongs to
+        # get the predict : means which cluster it belongs to
         index = model.predict(data)
         print('Data:%s belongs to cluster:%s. The index is %s' % (data, model.clusterCenters[index], index))
         return index, model.clusterCenters[index]
 
-
-
-    def vaildate(self,validate_data,model_name):
+    def vaildate(self, validate_data, model_name):
 
         correct = 0
         error = 0
@@ -158,47 +149,47 @@ class KMAnalyse:
         for line in validate_data:
             known_cluster = line[0]
             stay_predict_data = line[1]
-            predict_cluster = self.predict(model_name,stay_predict_data)[0] # Only get the index
+            predict_cluster = self.predict(model_name, stay_predict_data)[0]  # Only get the index
             if known_cluster == predict_cluster:
                 correct += 1
             else:
                 error += 1
 
         total = len(validate_data)
-        result = {'total':total,'correct':correct,'error':error,'accurancy':correct/total}
+        result = {'total': total, 'correct': correct, 'error': error, 'accurancy': correct / total}
 
         print(result)
         return result
 
-
-    def find_best_k(self,model_id):
+    def find_best_k(self, model_id):
         # TODO find best k
         sql = "select * "
 
-    def test_data(self):
+    def test_rfm_data(self):
         life_cycle = self.load_from_mysql('t_CMMS_ANALYSE_LIFE').select('CUST_NO', 'LIFE_CYC')
         value = self.load_from_mysql('t_CMMS_ANALYSE_VALUE').select('CUST_NO', 'CUST_VALUE')
         loyalty = self.load_from_mysql('t_CMMS_ANALYSE_LOYALTY').select('CUST_NO', 'LOYALTY')
-        rfm = loyalty.join(value, 'CUST_NO', 'left_outer').join(life_cycle, 'CUST_NO', 'left_outer').select('LIFE_CYC', 'CUST_VALUE', 'LOYALTY')
+        rfm = loyalty.join(value, 'CUST_NO', 'left_outer').join(life_cycle, 'CUST_NO', 'left_outer').select('LIFE_CYC',
+                                                                                                            'CUST_VALUE',
+                                                                                                            'LOYALTY')
 
         return rfm
 
+    def test_cust_info_data(self):
+        return self.load_from_mysql('t_CMMS_TEMP_KMEANS_COLUMNS').select('LIFE_CYC', 'LOYALTY', 'CUST_RANK', 'AGE',
+                                                                         'LOCAL', 'SEX', 'AUM')
 
-    def test_1(self):
-        return self.load_from_mysql('t_CMMS_TEMP_KMEANS_COLUMNS').select('LIFE_CYC','LOYALTY','CUST_RANK','AGE','LOCAL','SEX','AUM')
+    def test_credit_data(self):
+        return self.load_from_mysql('t_CMMS_TEMP_KMEANS_CREDIT').select('CREDIT', 'CYCLE_TIMES', 'CYCLE_AMT',
+                                                                        'INSTALLMENT_TIMES', 'INSTALLMENT_AMT',
+                                                                        'SWIPE_TIMES', 'SWIPE_AMT', 'CASH_TIMES',
+                                                                        'CASH_AMT')
 
 
 if __name__ == '__main__':
     kma = KMAnalyse()
-    df = kma.test_1()
-    kma.try_different_k(df,15)
-    #kma.train_model(df, 5, 'rmf_kmeans')
-    #kma.predict('rmf_kmeans',[2.28426396e-02, 2.57216490e+05, 1.32690355e+00])
-
-
-
-
-
-
-
-
+    df = kma.test_credit_data()
+    for i in range(10):
+        kma.try_different_k(df, 15)
+        # kma.train_model(df, 4, 'all_col_kmeans_k4')
+        # kma.predict('all_col_kmeans_k4',[1, 2, 2,27,330621,1,20000])

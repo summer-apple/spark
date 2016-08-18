@@ -1,8 +1,8 @@
 import pydevd
 from pyspark import SparkContext,SparkConf,SQLContext
+from pyspark.mllib.recommendation import *
 
-
-
+from numpy import array
 pydevd.settrace("60.191.25.130", port=8618, stdoutToServer=True, stderrToServer=True)
 
 
@@ -59,60 +59,40 @@ class Recommend:
 
         return rawArtistAlias.flatMap(buildArtistAliasFlatMap)
 
+
     def test(self):
-        artist_by_id = self.buildArtistByID(self.rawArtistData)
-        #artist_alias = self.buildArtistAlias(self.rawArtistAlias)
 
-        a = artist_by_id.lookup('6803336').head()
-        b = artist_by_id.lookup('1000010').head()
-
-        print(a)
-        print(b)
+        # Load and parse the data
+        data = self.sc.textFile('hdfs://master:9000/gmc/als_data.txt')
+        ratings = data.map(lambda line: [float(x) for x in line.split(',')])
 
 
+        # Build the recommendation model using Alternating Least Squares
+        rank = 10
+        numIterations = 20
+        model = ALS.train(ratings, rank, numIterations)
+
+        # Evaluate the model on training data
+        testdata = ratings.map(lambda p: (int(p[0]), int(p[1])))
+
+        predictions = model.predictAll(testdata).map(lambda r: ((r[0], r[1]), r[2]))
+
+        ratesAndPreds = ratings.map(lambda r: ((r[0], r[1]), r[2])).join(predictions)
+
+        print(ratings.take(1))
+        print(predictions.take(1))
+        print(ratesAndPreds.take(1))
 
 
-
+        MSE = ratesAndPreds.map(lambda r: (r[1][0] - r[1][1])**2).reduce(lambda x, y: x + y)/ratesAndPreds.count()
+        print("Mean Squared Error = " + str(MSE))
 
 
 
 if __name__ == '__main__':
-    #r = Recommend()
-    #r.test()
-    print('fuck you')
+    r = Recommend()
+    r.test()
+    pass
 
 
 
-
-'''
-1 24676497.033871297
-2 8951761.036445381
-3 5659909.243875426
-4 3544142.668226625
-5 2569484.7180111054
-6 2503238.746591233
-7 2236166.756611932
-8 1192086.322984488
-9 1286045.6170509097
-10 1139246.1954498296
-11 941970.3719946971
-12 938812.9030484511
-13 786332.4741078989
-14 739536.349951354
-15 682090.7420476933
-16 671403.9108427719
-17 661861.6621661095
-18 589244.7939772053
-19 620507.0306452995
-20 578411.2500735886
-21 535323.4772133254
-22 506451.4268414376
-23 487216.11703516694
-24 506179.81070595625
-25 470920.8930468655
-26 486354.4356718584
-27 437297.78198168345
-28 411169.2001897343
-29 447884.51890211453
-30 400038.37464469066
-'''
