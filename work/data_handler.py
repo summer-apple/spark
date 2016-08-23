@@ -45,6 +45,10 @@ class DataHandler:
         '''
 
         # 计算月份
+        print('----------------------生命周期-Start----------------------')
+
+        print('开始准备生命周期数据...')
+        print('开始计算月份')
 
         if season == 1:
             # date1 当前季度月份
@@ -67,7 +71,7 @@ class DataHandler:
         print('上一季度月份 old：', date2)
 
         # 加载AUM表
-        aum = self.load_from_mysql('t_CMMS_ASSLIB_ASSET').cache()
+        aum = self.load_from_mysql('t_CMMS_ASSLIB_ASSET_c').cache()
 
         # 拼接每季度三个月断数据
         season_new = aum.filter(aum.STAT_DAT == date1[0]).unionAll(aum.filter(aum.STAT_DAT == date1[1])).unionAll(
@@ -134,7 +138,7 @@ class DataHandler:
         self.sqlctx.clearCache()
 
         # 结果插入表
-
+        print('结果插入临时表：t_CMMS_TEMP_LIFECYCLE...')
         insert_lifecycle_sql = "replace into t_CMMS_TEMP_LIFECYCLE(CUST_NO,SAUM1,SAUM2,INCREASE,ACCOUNT_AGE,AUM_NOW,LAST_TR_DATE) values(%s,%s,%s,%s,%s,%s,%s)"
 
         # 缓冲区
@@ -149,14 +153,16 @@ class DataHandler:
             # 加载数据到缓冲区
 
             try:
+                # 计算增长率
                 increase = (row_dic['sum(AUM2)'] - row_dic['sum(AUM1)']) / row_dic['sum(AUM1)']
             except Exception:
                 increase = 0
 
+            # 计算开户时长（月份数） 若无则视为6个月以上
             if row_dic['ACCOUNT_AGE'] is None:
                 row_dic['ACCOUNT_AGE'] = 7
 
-            # the days since last tran
+            # 最后交易日期
             ltd = row_dic['LAST_TR_DATE']
             if ltd is not None:
                 try:
@@ -177,7 +183,7 @@ class DataHandler:
             temp.clear()
 
         self.calculate_life_cycle()
-        self.put_to_real_table(year, season)
+        self.lifecycle_to_real_table(year, season)
 
     def calculate_life_cycle(self):
 
@@ -186,6 +192,7 @@ class DataHandler:
         :return:
         '''
 
+        print('开始计算生命周期...')
         life_cycle = self.load_from_mysql('t_CMMS_TEMP_LIFECYCLE').cache()
 
         def clcmap(line):
@@ -197,27 +204,27 @@ class DataHandler:
 
             period = 0
             if aum_now is None:
-                period = 9  # unknown period
+                period = 9  # 未知
             elif aum_now < 1000 and last_tr_date > 365:
-                period = 3  # lost period
+                period = 3  # 流失期
             else:
                 if increase > 20 or account_age < 6:
-                    period = 0  # growing period
+                    period = 0  # 成长期
                 elif increase >= -20 and increase <= 20:
-                    period = 1  # grown period
+                    period = 1  # 成熟期
                 else:
-                    period = 2  # stable period
+                    period = 2  # 稳定期
 
             return period, cust_no
 
-        life_cycle.show()
-        print(life_cycle.count())
+
         map_result = life_cycle.map(clcmap).collect()
 
         # clear the life_cycle cache
         self.sqlctx.clearCache()
 
         temp = []
+        print('结果更新到临时表：t_CMMS_TEMP_LIFECYCLE...')
         update_life_period_sql = "update t_CMMS_TEMP_LIFECYCLE set PERIOD = %s where CUST_NO = %s"
         for row in map_result:
 
@@ -230,12 +237,13 @@ class DataHandler:
             self.mysql_helper.executemany(update_life_period_sql, temp)
             temp.clear()
 
-    def put_to_real_table(self, year, season):
+    def lifecycle_to_real_table(self, year, season):
         '''
         put life_cycle tmp table to real table
         :return:
         '''
 
+        print('开始将生命周期数据写入正式表中...')
         life_cycle = self.load_from_mysql('t_CMMS_TEMP_LIFECYCLE').select('CUST_NO', 'PERIOD')
         cust_info = self.load_from_mysql('t_CMMS_INFO_CUSTOMER').select('CUST_NO', 'CUST_ID', 'CUST_NAM')
 
@@ -267,8 +275,9 @@ class DataHandler:
         :return:
         '''
 
+        print('---------------------------客户价值-Start--------------------------')
         cust_info = self.load_from_mysql('t_CMMS_INFO_CUSTOMER').select('CUST_NO', 'CUST_ID', 'CUST_NAM').cache()
-        aum = self.load_from_mysql('t_CMMS_ASSLIB_ASSET').select('CUST_NO', 'STAT_DAT', 'AUM', 'ASS_TYPE').cache()
+        aum = self.load_from_mysql('t_CMMS_ASSLIB_ASSET_c').select('CUST_NO', 'STAT_DAT', 'AUM', 'ASS_TYPE').cache()
 
         base = half_year * 6
 
@@ -299,7 +308,7 @@ class DataHandler:
         # j.show()
 
 
-        # clear old data
+        # 清除原有数据
         self.mysql_helper.execute('truncate core.t_CMMS_ANALYSE_VALUE')
 
         # 开始联合其他表
@@ -327,6 +336,7 @@ class DataHandler:
                 return 6
 
         temp = []
+        print('将数据replace到正式表...')
         update_value_sql = "replace into t_CMMS_ANALYSE_VALUE(CUST_ID,CUST_NO,CUST_NM,CUST_VALUE,CUST_RANK,SLOT,UPDATE_TIME) values(%s,%s,%s,%s,%s,%s,now())"
         for row in all_col.collect():
 
@@ -354,7 +364,8 @@ class DataHandler:
         data for t_CMMS_ASSLIB_ASSTOT
         :return:
         '''
-        df_asset = self.load_from_mysql('t_CMMS_ASSLIB_ASSET').select('CUST_NO', 'CUST_ID', 'STAT_DAT', 'AUM', 'CUR',
+        print('---------------------------总资产-Start--------------------------')
+        df_asset = self.load_from_mysql('t_CMMS_ASSLIB_ASSET_c').select('CUST_NO', 'CUST_ID', 'STAT_DAT', 'AUM', 'CUR',
                                                                       'ACC_NAM').cache()
         # print(df_asset.count(), df_asset.columns)
 
@@ -389,6 +400,12 @@ class DataHandler:
         self.sql_operate(sql, df, 100)
 
     def debt_total(self):
+        '''
+        prepare data for total debt
+        :return:
+        '''
+
+        print('---------------------------总负债-Start--------------------------')
         df_debt = self.load_from_mysql('t_CMMS_ASSLIB_DEBT').select('LOAN_ACC', 'CUST_NO', 'CUST_ID', 'CUST_NAM',
                                                                     'BAL_AMT', 'GRANT_AMT', 'CUR')
         df_debt = df_debt.filter(df_debt.LOAN_ACC != '')
@@ -406,21 +423,33 @@ class DataHandler:
 
         df = df_total.map(m)
 
-        for d in df.collect():
-            print(d)
-
         sql = "replace into t_CMMS_ASSLIB_DEBTOT(CUST_NO,CUST_ID,ACC_NAM,CUR,LOAN_AMT,BAL_AMT,STAT_DAT) values(%s,%s,%s,%s,%s,%s,%s)"
 
         self.sql_operate(sql, df)
 
+
+
+
+
+
+
     def cycle_credit(self):
+
+        print('---------------------------信用卡-Start--------------------------')
+        # 交易流水
         credit_tran_df = self.load_from_mysql('t_CMMS_CREDIT_TRAN').select('ACCTNBR','MONTH_NBR','BILL_AMT','BILL_AMTFLAG').filter("BILL_AMTFLAG ='-'").cache()
+
+        # 卡账户信息
         credit_acct_df = self.load_from_mysql('ACCT_D').select('ACCTNBR','MONTH_NBR','STM_MINDUE')
 
+        # 还款计算
         return_amt = credit_tran_df.groupBy('ACCTNBR','MONTH_NBR').sum('BILL_AMT')
         return_amt = return_amt.select('ACCTNBR','MONTH_NBR',return_amt['sum(BILL_AMT)'].alias('RETURNED'))
 
+        # 去除0最低还款额，即未消费的账单月
         join = credit_acct_df.join(return_amt,['ACCTNBR','MONTH_NBR'],'outer').filter('STM_MINDUE != 0')
+
+        #join.show()
 
 
 
@@ -442,39 +471,72 @@ class DataHandler:
             else:
                 flag = 9
 
-            return Row(ACCTNBR=int(line['ACCTNBR']),MONTH_NBR=line['MONTH_NBR'],DUE_FLAG=flag)
+            return Row(ACCTNBR=int(line['ACCTNBR']),MONTH_NBR=line['MONTH_NBR'], DUE_FLAG=flag, STM_MINDUE=line['STM_MINDUE'])
 
 
 
 
-
+        # 返回为PipelinedRDD
         join = join.map(which_cycle_type)
-        print(type(join))
+
+        # 转为DataFrame
         join = self.sqlctx.createDataFrame(join)
-        print(type(join))
+        '''
+        +-------+--------+-----+
+        | ACCTNBR | DUE_FLAG | count |
+        +-------+--------+-----+
+        | 608126 |    2 |    1 |
+        | 608126 |    0 |    6 |
+        | 608868 |    0 |    4 |
+        '''
+        # 按还款类型分类
+        each_type = join.groupBy(['ACCTNBR','DUE_FLAG'])
+
+        # 计算每种还款情况数量
+        each_type_count = each_type.count()
+
+        # 计算每种还款情况的最低还款额之和
+        each_type_mindue_sum = each_type.sum('STM_MINDUE')
 
 
-        result = join.groupBy(['ACCTNBR','DUE_FLAG']).count().sort('ACCTNBR')
+        # 计算还款情况总数
+        all_type_count = each_type_count.groupBy('ACCTNBR').sum('count')
+
+        # join 上述三表
+        rate = each_type_count.join(each_type_mindue_sum, ['ACCTNBR', 'DUE_FLAG'], 'outer').join(all_type_count, 'ACCTNBR', 'outer')
+
+        # print(rate.columns)
+        # ['ACCTNBR', 'DUE_FLAG', 'count', 'sum(STM_MINDUE)', 'sum(count)']
+
+        # 筛选出循环信用的数据
+        # TODO 暂时只取了循环信用的
+
+        rate = rate.filter(rate['DUE_FLAG'] == 1)
+
+        # 计算进入循环信用的比例
+        rate = rate.select('ACCTNBR',
+                           (rate['sum(STM_MINDUE)']*10).alias('CYCLE_AMT'),
+                           rate['count'].alias('CYCLE_TIMES'),
+                           (rate['count']/rate['sum(count)']).alias('CYCLE_RATE'))
+
+        #rate.show()
+        #print(rate.count())
 
 
-        count = result.filter('DUE_FLAG=9').count()
+        def m(line):
+            return line['CYCLE_TIMES'],line['CYCLE_AMT'],line['CYCLE_RATE'],line['ACCTNBR']
 
-        print(count)
+        sql = "update t_CMMS_TEMP_KMEANS_CREDIT set CYCLE_TIMES=%s,CYCLE_AMT=%s,CYCLE_RATE=%s where ACCTNBR=%s"
 
+        df = rate.map(m)
 
-
-
-
-
-
-
+        print('将数据更新至数据库...')
+        self.sql_operate(sql,df)
 
 
-
-
-
-
-
+        # 将未进入循环的 设为0
+        print('将未进入循环的 设为0...')
+        self.mysql_helper.execute("update t_CMMS_TEMP_KMEANS_CREDIT set CYCLE_TIMES=0,CYCLE_AMT=0,CYCLE_RATE=0 where CYCLE_TIMES is null ")
 
 
 
@@ -488,7 +550,7 @@ class DataHandler:
     def sql_operate(self, sql, df, once_size=1000):
         temp = []
         for row in df.collect():
-            print(row)
+            #print(row)
             if len(temp) >= once_size:
                 self.mysql_helper.executemany(sql, temp)
                 temp.clear()
@@ -499,7 +561,7 @@ class DataHandler:
             temp.clear()
 
     def test(self):
-        df_asset = self.load_from_mysql('t_CMMS_ASSLIB_ASSET').select('CUST_NO', 'CUST_ID', 'STAT_DAT', 'AUM', 'CUR',
+        df_asset = self.load_from_mysql('t_CMMS_ASSLIB_ASSET_c').select('CUST_NO', 'CUST_ID', 'STAT_DAT', 'AUM', 'CUR',
                                                                       'ACC_NAM').cache()
         other_col1 = df_asset.select('CUST_NO', 'CUST_ID', 'CUR', 'ACC_NAM').groupBy('CUST_NO').agg(
             {'CUST_NO': 'first', 'CUST_ID': 'first', 'CUR': 'first', 'ACC_NAM': 'first'})
@@ -507,17 +569,25 @@ class DataHandler:
         print(other_col1.count(), other_col2.count())
 
 
+
+    def  run(self):
+        # 生命周期 年份 季度1,2,3,4
+        dh.prepare_life_cycle(2016, 2)
+
+        # 客户价值 上半年：0,下半年：1
+        dh.customer_value(2016, 0)
+
+        # 总资产
+        dh.aum_total()
+
+        # 总负债
+        dh.debt_total()
+
 if __name__ == '__main__':
     dh = DataHandler()
 
-    # 生命周期 年份 季度
-    # dh.prepare_life_cycle(2016, 2)
-
-    # dh.put_to_real_table(2016, 2)
-
-    # dh.customer_value(2016,0)
-
-
-    # dh.aum_total()
     dh.cycle_credit()
+
+
+    # dh.cycle_credit()
     # dh.test()

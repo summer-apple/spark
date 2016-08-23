@@ -12,7 +12,7 @@ except ImportError:
 import datetime
 
 
-pydevd.settrace("60.191.25.130", port=8618, stdoutToServer=True, stderrToServer=True)
+#pydevd.settrace("60.191.25.130", port=8618, stdoutToServer=True, stderrToServer=True)
 
 
 
@@ -153,7 +153,7 @@ class KMData:
     def credit_card(self):
 
         #清空缓存表，导入新的额度数据
-        init_credit_sql = "insert into t_CMMS_TEMP_KMEANS_CREDIT(ACCTNBR,CREDIT) (select XACCOUNT,CRED_LIMIT from core.ACCT)"
+        init_credit_sql = "replace into t_CMMS_TEMP_KMEANS_CREDIT(ACCTNBR,CREDIT) (select XACCOUNT,CRED_LIMIT from core.ACCT)"
         self.mysql_helper.execute('truncate t_CMMS_TEMP_KMEANS_CREDIT')
         self.mysql_helper.execute(init_credit_sql)
 
@@ -165,15 +165,10 @@ class KMData:
 
 
 
-        #加载额度数据
-        credit_limit_df = self.load_from_mysql('t_CMMS_TEMP_KMEANS_CREDIT').select('ACCTNBR','CREDIT')
-
-
-
-        #计算循环
-        join = credit_df.groupBy('ACCTNBR').sum('BILL_AMT').join(credit_limit_df,'ACCTNBR','outer')
-
-        cycle = join.select('ACCTNBR',join['sum(BILL_AMT)'].alias('CYCLE_AMT'),'CREDIT')
+        #计算循环(此处为刷卡金额占额度的比例，不是真正的循环信用）
+        # join = credit_df.groupBy('ACCTNBR').sum('BILL_AMT').join(credit_limit_df,'ACCTNBR','outer')
+        #
+        # cycle = join.select('ACCTNBR',join['sum(BILL_AMT)'].alias('CYCLE_AMT'),'CREDIT')
 
         #刷卡金额与次数
         swipe_amt = credit_df.groupBy('ACCTNBR').sum('BILL_AMT')
@@ -224,32 +219,35 @@ class KMData:
 
         #汇总
 
-        all_join = cycle.join(swipe_result,'ACCTNBR','outer').join(cash_result,'ACCTNBR','outer').join(im_result,'ACCTNBR','outer')
+        # 加载额度数据
+        credit_limit_df = self.load_from_mysql('t_CMMS_TEMP_KMEANS_CREDIT').select('ACCTNBR', 'CREDIT')
+
+        all_join = swipe_result.join(cash_result,'ACCTNBR','outer').join(im_result,'ACCTNBR','outer').join(credit_limit_df,'ACCTNBR','outer')
 
         all_join.show()
 
         def m(line):
             acctnbr = line['ACCTNBR']
             credit = line['CREDIT'] if line['CREDIT'] is not None else 0
-            cycle_amt = line['CYCLE_AMT'] if line['CYCLE_AMT'] is not None else 0
-            try:
-                cycle_times = cycle_amt/credit
-            except ZeroDivisionError:
-                cycle_times = 0
+            # cycle_amt = line['CYCLE_AMT'] if line['CYCLE_AMT'] is not None else 0
+            # try:
+            #     cycle_times = cycle_amt/credit
+            # except ZeroDivisionError:
+            #     cycle_times = 0
 
             swipe_amt = line['SWIPE_AMT'] if line['SWIPE_AMT'] is not None else 0
             swipe_times = line['SWIPE_TIMES'] if line['SWIPE_TIMES'] is not None else 0
             cash_amt = line['CASH_AMT'] if line['CASH_AMT'] is not None else 0
-            cash_times = line['CASH_AMT'] if line['CASH_AMT'] is not None else 0
+            cash_times = line['CASH_TIMES'] if line['CASH_TIMES'] is not None else 0
             installment_amt = line['INSTALLMENT_AMT'] if line['INSTALLMENT_AMT'] is not None else 0
             installment_times = line['INSTALLMENT_TIMES'] if line['INSTALLMENT_TIMES'] is not None else 0
 
 
 
-            return acctnbr,credit,cycle_amt,cycle_times,swipe_amt,swipe_times,cash_amt,cash_times,installment_amt,installment_times
+            return acctnbr,credit,swipe_amt,swipe_times,cash_amt,cash_times,installment_amt,installment_times
 
 
-        sql = "replace into t_CMMS_TEMP_KMEANS_CREDIT(ACCTNBR,CREDIT,CYCLE_AMT,CYCLE_TIMES,SWIPE_AMT,SWIPE_TIMES,CASH_AMT,CASH_TIMES,INSTALLMENT_AMT,INSTALLMENT_TIMES) values(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"
+        sql = "replace into t_CMMS_TEMP_KMEANS_CREDIT(ACCTNBR,CREDIT,SWIPE_AMT,SWIPE_TIMES,CASH_AMT,CASH_TIMES,INSTALLMENT_AMT,INSTALLMENT_TIMES) values(%s,%s,%s,%s,%s,%s,%s,%s)"
         df = all_join.map(m)
 
         self.sql_operate(sql,df)

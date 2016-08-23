@@ -3,6 +3,7 @@ from pyspark import SparkContext, SparkConf, SQLContext
 from pyspark.mllib.clustering import KMeans, KMeansModel
 from pyspark.mllib.linalg import Vectors
 import math
+import decimal
 
 try:
     from mysql_helper import MySQLHelper
@@ -56,7 +57,7 @@ class KMAnalyse:
 
         return data.map(dist_to_centroid).mean()
 
-    def try_different_k(self, dataframe, stop, start=2):
+    def try_different_k(self, dataframe, max_k, min_k=2):
         data = self.prepare_data(dataframe)
 
         get_id_sql = "select ID from t_CMMS_TEMP_KMEANS_RESULT order by ID desc limit 1"
@@ -65,12 +66,14 @@ class KMAnalyse:
         except:
             id = 1
         columns = str(dataframe.columns)
-
-        for k in range(start, stop):
+        l = []
+        for k in range(min_k, max_k):
             sorce = self.clustering_score(data, k)
             print(k, sorce)
-            #self.mysql_helper.execute('insert into t_CMMS_TEMP_KMEANS_RESULT(ID,K,SORCE,COLUMNS) values(%s,%s,%s,%s)',
-                                      (id, k, sorce, columns))
+            l.append(sorce)
+            self.mysql_helper.execute('insert into t_CMMS_TEMP_KMEANS_RESULT(ID,K,SORCE,COLUMNS) values(%s,%s,%s,%s)', (id, k, sorce, columns))
+        return id
+
 
     def prepare_data(self, dataframe):
         '''
@@ -115,10 +118,17 @@ class KMAnalyse:
             pass
         # save new model on hdfs
         model.save(self.sc, path)
-
         # print all cluster of the model
         for c in model.clusterCenters:
-            print(c)
+            l = []
+            for i in c:
+                i = decimal.Decimal(i).quantize(decimal.Decimal('0.01'))
+                l.append(float(i))
+            print(l)
+
+
+
+
 
     def predict(self, model_name, data):
 
@@ -161,9 +171,38 @@ class KMAnalyse:
         print(result)
         return result
 
-    def find_best_k(self, model_id):
-        # TODO find best k
-        sql = "select * "
+    def find_best_k(self, df, times, min_k=2, max_k=15):
+        l = []
+
+        for i in range(times):
+            id = kma.try_different_k(df, max_k)
+            l.append(id)
+
+        sql = "SELECT k,avg(SORCE) FROM t_CMMS_TEMP_KMEANS_RESULT  where ID in %s group by K" % str(tuple(l))
+        result = self.mysql_helper.fetchall(sql)
+        for i in result:
+            print(i[0])
+        print('\n')
+        for i in result:
+            print(i[1])
+
+
+    def print_model(self,model_name):
+        # try to load the specified model
+        path = self.base + model_name
+        try:
+            model = KMeansModel.load(self.sc, path)
+        except:
+            raise Exception('No such model found on hdfs!')
+
+        for c in model.clusterCenters:
+            print(c)
+        for c in model.clusterCenters:
+            l = []
+            for i in c:
+                i = decimal.Decimal(i).quantize(decimal.Decimal('0.01'))
+                l.append(float(i))
+            print(l)
 
     def test_rfm_data(self):
         life_cycle = self.load_from_mysql('t_CMMS_ANALYSE_LIFE').select('CUST_NO', 'LIFE_CYC')
@@ -185,11 +224,41 @@ class KMAnalyse:
                                                                         'SWIPE_TIMES', 'SWIPE_AMT', 'CASH_TIMES',
                                                                         'CASH_AMT')
 
+    def full_keys_data(self):
+        return self.load_from_mysql('t_CMMS_TEMP_KMEANS_CREDIT').select('CREDIT', 'CYCLE_TIMES', 'CYCLE_AMT', 'CYCLE_RATE',
+                                                                        'INSTALLMENT_TIMES', 'INSTALLMENT_AMT',
+                                                                        'SWIPE_TIMES', 'SWIPE_AMT', 'CASH_TIMES',
+                                                                        'CASH_AMT')
+
+
+    def no_cycle_data(self):
+        return self.load_from_mysql('t_CMMS_TEMP_KMEANS_CREDIT').select('CREDIT',
+                                                                        'INSTALLMENT_TIMES', 'INSTALLMENT_AMT',
+                                                                        'SWIPE_TIMES', 'SWIPE_AMT', 'CASH_TIMES',
+                                                                        'CASH_AMT')
+    def no_amt_data(self):
+        return self.load_from_mysql('t_CMMS_TEMP_KMEANS_CREDIT').select('CREDIT', 'CYCLE_TIMES',
+                                                                        'CYCLE_RATE',
+                                                                        'INSTALLMENT_TIMES',
+                                                                        'SWIPE_TIMES',  'CASH_TIMES')
+
+    def no_cycle_amt(self):
+        return self.load_from_mysql('t_CMMS_TEMP_KMEANS_CREDIT').select('CREDIT', 'CYCLE_TIMES',
+                                                                        'CYCLE_RATE',
+                                                                        'INSTALLMENT_TIMES', 'INSTALLMENT_AMT',
+                                                                        'SWIPE_TIMES', 'SWIPE_AMT', 'CASH_TIMES',
+                                                                        'CASH_AMT')
+
 
 if __name__ == '__main__':
     kma = KMAnalyse()
-    df = kma.test_credit_data()
-    for i in range(10):
-        kma.try_different_k(df, 15)
-        # kma.train_model(df, 4, 'all_col_kmeans_k4')
-        # kma.predict('all_col_kmeans_k4',[1, 2, 2,27,330621,1,20000])
+    #df = kma.no_cycle_amt()
+
+    # kma.find_best_k(df,10,max_k=15)
+    #kma.train_model(df, 7, 'aaa')
+    #kma.train_model(df, 8, 'aa')
+    # kma.train_model(df, 7, 'credit_no_amt_k8')
+    # kma.predict('all_col_kmeans_k4',[1, 2, 2,27,330621,1,20000])
+
+
+
