@@ -21,6 +21,7 @@ try:
     # from PySparkUsage.util.logger import Logger
 except ImportError:  # 如果未能成功导入
     import sys
+
     # 将当前的项目路径添加到系统路径变量中
     # 这里是/home/hadoop/jjzhu/workspace
     # 如果改变了的话，也要相应的改变这里的路径
@@ -67,7 +68,7 @@ class DataAnalysis:
         :param dbtable: 表名
         :return: DataFrame
         """
-        url = "jdbc:mysql://10.9.29.212:3306/"+db+"?user=root&characterEncoding=UTF-8"
+        url = "jdbc:mysql://10.9.29.212:3306/" + db + "?user=root&characterEncoding=UTF-8"
         df = self.sql_context.read.format("jdbc").options(url=url,
                                                           dbtable=dbtable,
                                                           driver="com.mysql.jdbc.Driver").load()
@@ -144,7 +145,8 @@ class DataAnalysis:
         curr_bal_df = self.load_from_mysql('core', 'BDFMHQAB_D')
         close_acc_df = self.load_from_mysql('core', 'BDFMHQBQ_D')
         acc_list = self.load_from_mysql('core', 't_CMMS_ACCOUNT_LIST').select('ACC_NO15', 'ACC_NO22').distinct()
-        curr_bal_df = curr_bal_df.select('AB01AC15', 'AB16BAL', 'AB33DATE', 'AB08ACST').sort(curr_bal_df.AB33DATE.desc())\
+        curr_bal_df = curr_bal_df.select('AB01AC15', 'AB16BAL', 'AB33DATE', 'AB08ACST').sort(
+            curr_bal_df.AB33DATE.desc()) \
             .groupBy('AB01AC15').agg({'AB16BAL': 'first', 'AB33DATE': 'first', 'AB08ACST': 'first'})
         bal_join_rdd = acc_list.join(curr_bal_df, curr_bal_df.AB01AC15 == acc_list.ACC_NO15, 'left_outer')
         insert_result = []
@@ -218,7 +220,7 @@ class DataAnalysis:
         for time_slot in time_slots:
             # print('call procedure Init_Balance (%s, %s)' % (str(time_slot), str(3)))
             print('call procedure Init_Balance (%s, %s)' % (str(time_slot), str(BusinessType.MONEY_MMG.value)))
-            self.init_balance(str(time_slot[0]),  BusinessType.MONEY_MMG)
+            self.init_balance(str(time_slot[0]), BusinessType.MONEY_MMG)
             # self.init_balance(time_slot[0], BusinessType.MONEY_MMG)
             # self.mysqlconn.call_proc(proc_name='Init_Balance', args=('\''+str(time_slot[0])+'\''))
             # self._calc_bal_by_type(time_slot[0], BusinessType.MONEY_MMG)
@@ -237,7 +239,8 @@ class DataAnalysis:
         # self._calc_bal_by_type('2016-07-01', 1)
 
         for time_slot in time_slots:
-            self.logger.info('call method: init_balance (%s, %s)' % (str(time_slot[0]), str(BusinessType.CURR_DEP.value)))
+            self.logger.info(
+                'call method: init_balance (%s, %s)' % (str(time_slot[0]), str(BusinessType.CURR_DEP.value)))
             self.init_balance(str(time_slot[0]), BusinessType.CURR_DEP)
             # self._calc_bal_by_type(time_slot[0], BusinessType.CURR_DEP)
 
@@ -249,7 +252,6 @@ class DataAnalysis:
         end_time = datetime.datetime.now().__format__('%Y-%m-%d')
         time_slots = self.get_time_slot(start_time[:start_time.rindex('-')], end_time[:end_time.rindex('-')], '%Y-%m')
         for time_slot in time_slots:
-
             # print('call procedure Init_Balance (%s, %s)' % (str(time_slot[0]), str(BusinessType.FIX_TIME_DEP.value)))
 
             # self.mysqlconn.execute_single('call Init_Balance(%s, %s)', (str(time_slot[0]),  str(2)))
@@ -301,7 +303,7 @@ class DataAnalysis:
         # self.mysqlconn.execute_single('call Drop_all()')
 
         # self.logger.info('开始计算活期存款AUM')
-
+        self.calc_CA()
         # 计算定期
         self.calc_FA()
         # 计算理财的
@@ -323,7 +325,7 @@ class DataAnalysis:
         save_mode = 'append'
         acc_detail_source = self.sc.textFile('%s/jjzhu/test/input/t_CMMS_ACCOUNT_DETAIL.txt' % self.hdfs_root_url)
         # 这里是更新t_CMMS_TEMP_ACTTIME表的
-        acc_list = self.load_from_mysql('core', 't_CMMS_ACCOUNT_LIST')\
+        acc_list = self.load_from_mysql('core', 't_CMMS_ACCOUNT_LIST') \
             .map(lambda row: (row.asDict()['ACC_NO15'], (row.asDict()['CUST_NO'], row.asDict()['ACC_NAM']))).distinct()
         acc_list.cache()  # 添加缓存
         split_rdd = acc_detail_source.map(lambda line: line.split(','))
@@ -334,10 +336,10 @@ class DataAnalysis:
         for slot in time_slots:
             self.logger.info('statistic action time of %s' % slot[0][0: slot[0].rindex('-')])
             # 以 客户号+业务类型为key，统计客户不同类型的交易次数
-            act_time = split_rdd.filter(lambda columns: columns[1] <= slot[1])\
-                .filter(lambda columns: columns[1] >= slot[0])\
-                .map(lambda columns: (columns[3]+'_'+columns[6], 1))\
-                .reduceByKey(lambda a, b: a+b)
+            act_time = split_rdd.filter(lambda columns: columns[1] <= slot[1]) \
+                .filter(lambda columns: columns[1] >= slot[0]) \
+                .map(lambda columns: (columns[3] + '_' + columns[6], 1)) \
+                .reduceByKey(lambda a, b: a + b)
 
             mapped_act_time = act_time.map(lambda fields:
                                            (fields[0].split('_')[0],
@@ -345,7 +347,7 @@ class DataAnalysis:
                                              fields[1], slot[0][0: slot[0].rindex('-')])))
             # join操作，连接客户号对应的具体信息
             result = mapped_act_time.join(acc_list).map(lambda fields: fields[1][0] + fields[1][1])
-           
+
             #  ACCT_NO15， BUST_TYPE, ACT_TIME, CURR_MONTH, CUST_NO, ACCT_NAM
             # '101006463122653', '1', 25, '2016-02-01', '81024082971', '曹镇颜'
 
@@ -377,10 +379,10 @@ class DataAnalysis:
         loyalty_insert_query = 'insert into t_CMMS_ANALYSE_LOYALTY(CUST_ID, CUST_NO, CUST_NM, LOYALTY, MONTH, ' \
                                'UPDATE_TIME) value (%s, %s, %s, %s, %s, %s)'
         # 根据CUST_NO分组并对ACT_TIME求和
-        sum_result = temp_act_time_tf.filter(temp_act_time_tf.CUST_NO != '')\
-            .filter(temp_act_time_tf.CURR_MONTH >= start_time[:start_time.rindex('-')])\
-            .filter(temp_act_time_tf.CURR_MONTH <= end_time[:end_time.rindex('-')])\
-            .groupBy('CUST_NO')\
+        sum_result = temp_act_time_tf.filter(temp_act_time_tf.CUST_NO != '') \
+            .filter(temp_act_time_tf.CURR_MONTH >= start_time[:start_time.rindex('-')]) \
+            .filter(temp_act_time_tf.CURR_MONTH <= end_time[:end_time.rindex('-')]) \
+            .groupBy('CUST_NO') \
             .sum('ACT_TIME')
         # 连接客户信息（有些字段为空的）
         join_result_df = sum_result.join(cust_info_df, cust_info_df.c_cust_no == sum_result.CUST_NO, 'left_outer')
@@ -414,7 +416,7 @@ class DataAnalysis:
         scheduler = sched.scheduler(timefunc=time.time, delayfunc=time.sleep)
 
         def ca_job():
-            scheduler.enter(24*60*60, 0, ca_job)
+            scheduler.enter(24 * 60 * 60, 0, ca_job)
             print(datetime.datetime.now())
             _time = str(datetime.datetime.now().strftime('%Y-%m-%d'))
             print('call init_balance(%s, %s)' % (_time, BusinessType.CURR_DEP))
@@ -423,7 +425,7 @@ class DataAnalysis:
             self.init_balance(_time, 1)
 
         def fa_job():
-            scheduler.enter(24*60*60, 0, fa_job)
+            scheduler.enter(24 * 60 * 60, 0, fa_job)
             print(datetime.datetime.now())
             _time = str(datetime.datetime.now().strftime('%Y-%m-%d'))
             print('call init_balance(%s, %s)' % (_time, BusinessType.FIX_TIME_DEP))
@@ -434,12 +436,13 @@ class DataAnalysis:
             now = datetime.datetime.now()
             late = datetime.datetime(now.year, now.month, now.day, 16, 29)
             if late > now:
-                time_delay = (late-now).seconds
-                print('time delay '+str(time_delay) + ' s')
-                time.sleep((late-now).seconds)
+                time_delay = (late - now).seconds
+                print('time delay ' + str(time_delay) + ' s')
+                time.sleep((late - now).seconds)
             fa_job()
             ca_job()
             scheduler.run()
+
         start()
 
     def end(self):
@@ -501,7 +504,7 @@ class DataAnalysis:
                 self.logger.warning('%s is not exist, created it successful' % hdfs_input_path)
             target_save_table = 't_CMMS_ASSLIB_ASSET_c'  # TODO
             save_mode = 'append'
-            local_output_file_path = local_output_path+merged_file_name
+            local_output_file_path = local_output_path + merged_file_name
             local_dir_for_merge = local_temp_path + cdate.strftime('%Y_%m')
 
             # Row()转换成tuple
@@ -514,7 +517,7 @@ class DataAnalysis:
 
             def calc_avg(el):
                 r = el[1]
-                return (r[0], r[1], float(r[2])/int(r[3]), r[4],
+                return (r[0], r[1], float(r[2]) / int(r[3]), r[4],
                         datetime.datetime.strptime(str(r[5]), '%Y-%m-%d').strftime('%Y-%m'), r[6])
 
             # 将hdfs上每个月的数据移到本地
@@ -522,7 +525,7 @@ class DataAnalysis:
                 import sys
                 if not os.path.exists(local_dir):
                     self.logger.warning('%s is not existed, create it first.' % local_dir)
-                    os.system('mkdir '+local_dir)
+                    os.system('mkdir ' + local_dir)
                     # exit(-1)
                 shell_command = 'hadoop fs -copyToLocal %s %s' % (hdfs_dir, local_dir)
                 self.logger.info('execute hdfs shell command: %s' % shell_command)
@@ -540,14 +543,14 @@ class DataAnalysis:
                     else:
                         self.logger.error('unknown platform: %s' % platform.system())
                     for i in os.listdir(input_dir):
-                        curr_dir = input_dir+deli+i
+                        curr_dir = input_dir + deli + i
                         for j in os.listdir(curr_dir):
                             if j.startswith('part'):  # 只合并以part开头的输出文件
-                                with open(curr_dir+deli+j) as f:
+                                with open(curr_dir + deli + j) as f:
                                     # print(curr_dir+deli+j)
                                     for line in f.readlines():
                                         # print(line[1:len(line)-2])
-                                        output_file.write(line[1:len(line)-2]+'\n')
+                                        output_file.write(line[1:len(line) - 2] + '\n')
 
                     output_file.close()
                 else:
@@ -572,9 +575,9 @@ class DataAnalysis:
                 if curr_bal_rdd.count() == 0:
                     self.logger.warning('rdd is empty')
                     continue
-                if os.system('hadoop fs -test -e '+hdfs_path) == 0:
+                if os.system('hadoop fs -test -e ' + hdfs_path) == 0:
                     self.logger.warning('%s is already existed, deleting' % hdfs_path)
-                    if os.system('hadoop fs -rm -r '+hdfs_path) == 0:
+                    if os.system('hadoop fs -rm -r ' + hdfs_path) == 0:
                         self.logger.info('delete %s successful' % hdfs_path)
                 # 保存当前余额信息到hdfs上以便合并
                 self.logger.info('save rdd context to %s' % hdfs_path)
@@ -587,32 +590,33 @@ class DataAnalysis:
                              (local_dir_for_merge, local_output_file_path))
             merge_file(local_dir_for_merge, local_output_file_path)
             # 合并后的文件移回hdfs作为AUM的输入
-            if os.system('hadoop fs -test -e '+hdfs_input_path) == 1:
+            if os.system('hadoop fs -test -e ' + hdfs_input_path) == 1:
                 self.logger.warning('hdfs dir: %s is not exist' % hdfs_input_path)
                 self.logger.info('\texecute hdfs command: hadoop fs -mkdir %s' % hdfs_input_path)
-                os.system('hadoop fs -mkdir '+hdfs_input_path)
-            if os.system('hadoop fs -test -e ' + hdfs_input_path+merged_file_name) == 0:
-                self.logger.info('hdfs file: %s is already exist' % hdfs_input_path+merged_file_name)
-                self.logger.info('\texcute hdfs command: hadoop fs -rm ' + hdfs_input_path+merged_file_name)
-                os.system('hadoop fs -rm ' + hdfs_input_path+merged_file_name)
+                os.system('hadoop fs -mkdir ' + hdfs_input_path)
+            if os.system('hadoop fs -test -e ' + hdfs_input_path + merged_file_name) == 0:
+                self.logger.info('hdfs file: %s is already exist' % hdfs_input_path + merged_file_name)
+                self.logger.info('\texcute hdfs command: hadoop fs -rm ' + hdfs_input_path + merged_file_name)
+                os.system('hadoop fs -rm ' + hdfs_input_path + merged_file_name)
             os.system('hadoop fs -put ' + local_output_file_path + ' ' + hdfs_input_path)
 
             # 计算AUM
             self.logger.info('start calculate AUM of %s' % cdate.strftime('%Y-%m'))
-            all_data = self.sc.textFile(hdfs_input_path+merged_file_name)
+            all_data = self.sc.textFile(hdfs_input_path + merged_file_name)
 
-            day_bal = all_data.map(lambda line: line.strip().split(','))\
-                .map(lambda fields: (fields[0].strip()[1:len(fields[0].strip())-1],  # CUST_NO
-                                     fields[1].strip()[1:len(fields[1].strip())-1],  # ACCT_NO15
-                                     float(fields[2].strip()[1:len(fields[2].strip())-1]),  # CURR_BAL
+            day_bal = all_data.map(lambda line: line.strip().split(',')) \
+                .map(lambda fields: (fields[0].strip()[1:len(fields[0].strip()) - 1],  # CUST_NO
+                                     fields[1].strip()[1:len(fields[1].strip()) - 1],  # ACCT_NO15
+                                     float(fields[2].strip()[1:len(fields[2].strip()) - 1]),  # CURR_BAL
                                      1,  # TIME
-                                     fields[4].strip()[1:len(fields[4].strip())-1],  # CUR
-                                     fields[5].strip()[1:len(fields[5].strip())-1],  # CURR_DATE
-                                     fields[6].strip()[1:len(fields[6].strip())-1],  # BUSI_TYPE
+                                     fields[4].strip()[1:len(fields[4].strip()) - 1],  # CUR
+                                     fields[5].strip()[1:len(fields[5].strip()) - 1],  # CURR_DATE
+                                     fields[6].strip()[1:len(fields[6].strip()) - 1],  # BUSI_TYPE
                                      ))
             # 用ACCT_NO15位主键，并累加余额和次数，然后在计算日均余额
-            add_bal = day_bal.map(lambda fields: (fields[1], fields))\
-                .reduceByKey(lambda a, b: (a[0], a[1], float(float(a[2])+float(b[2])), int(a[3])+int(b[3]), a[4], max(a[5], b[5]), a[6]))\
+            add_bal = day_bal.map(lambda fields: (fields[1], fields)) \
+                .reduceByKey(lambda a, b: (
+            a[0], a[1], float(float(a[2]) + float(b[2])), int(a[3]) + int(b[3]), a[4], max(a[5], b[5]), a[6])) \
                 .map(calc_avg)
             # 判断保存目录路径是否存在，若存在，则将其删除，否则savaAsTexstFile操作会报错
             if os.system('hadoop fs -test -e ' + hdfs_save_path) == 0:
@@ -624,15 +628,15 @@ class DataAnalysis:
             os.system('hadoop fs -put %s%s %s' % (local_result_path, result_file_name,
                                                   hdfs_input_path))
 
-            result_rdd = self.sc.textFile(hdfs_input_path+result_file_name)
-            mapped_rdd = result_rdd.map(lambda line: line[1: len(line)-1])\
-                .map(lambda line: line.split(','))\
-                .map(lambda fields: (fields[0].strip()[1:len(fields[0].strip())-1],
-                                     fields[1].strip()[1:len(fields[1].strip())-1],  # ACCT_NO15
+            result_rdd = self.sc.textFile(hdfs_input_path + result_file_name)
+            mapped_rdd = result_rdd.map(lambda line: line[1: len(line) - 1]) \
+                .map(lambda line: line.split(',')) \
+                .map(lambda fields: (fields[0].strip()[1:len(fields[0].strip()) - 1],
+                                     fields[1].strip()[1:len(fields[1].strip()) - 1],  # ACCT_NO15
                                      float(fields[2].strip()[0:len(fields[2].strip())]),  # AUM
-                                     fields[3].strip()[1:len(fields[3].strip())-1],  # CUR
-                                     fields[4].strip()[1:len(fields[4].strip())-1],  # STAT_DAT
-                                     fields[5].strip()[1:len(fields[5].strip())-1],  # ASS_TYPE
+                                     fields[3].strip()[1:len(fields[3].strip()) - 1],  # CUR
+                                     fields[4].strip()[1:len(fields[4].strip()) - 1],  # STAT_DAT
+                                     fields[5].strip()[1:len(fields[5].strip()) - 1],  # ASS_TYPE
                                      ))
             # 重新创建对应的DataFrame并创建对应的writer
             writer = DataFrameWriter(self.sql_context.createDataFrame(mapped_rdd, ['CUST_NO', 'ACC_NO15', 'AUM', 'CUR',
@@ -676,10 +680,10 @@ class DataAnalysis:
             result_dict = dict([item for item in filter_result])
             return sorted(result_dict.items(), key=lambda item: item[1], reverse=True)
 
-        tran_data = self.load_from_mysql('core', 't_CMMS_CREDIT_TRAN')\
-            .filter('BILL_AMTFLAG = \'+\'').select('CARD_NBR', 'DES_LINE1')\
-            .map(lambda r: (r.asDict()['CARD_NBR'].strip(), [r.asDict()['DES_LINE1'].strip()]))\
-            .reduceByKey(lambda a, b: a + b).map(lambda elem: (elem[0], most_freq(elem[1])))\
+        tran_data = self.load_from_mysql('core', 't_CMMS_CREDIT_TRAN') \
+            .filter('BILL_AMTFLAG = \'+\'').select('CARD_NBR', 'DES_LINE1') \
+            .map(lambda r: (r.asDict()['CARD_NBR'].strip(), [r.asDict()['DES_LINE1'].strip()])) \
+            .reduceByKey(lambda a, b: a + b).map(lambda elem: (elem[0], most_freq(elem[1]))) \
             .filter(lambda elem: len(elem[1]) > 0)
 
         for row in tran_data.take(10):

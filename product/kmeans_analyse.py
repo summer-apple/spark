@@ -1,4 +1,4 @@
-    import pydevd
+import pydevd
 from pyspark import SparkContext, SparkConf, SQLContext
 from pyspark.mllib.clustering import KMeans, KMeansModel
 from pyspark.mllib.linalg import Vectors
