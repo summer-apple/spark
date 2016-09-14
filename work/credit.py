@@ -330,4 +330,5 @@ class Credit:
 
 if __name__ == '__main__':
     c = Credit()
-    c.losing_warn(2016,7)
+    #c.losing_warn(2016,7)
+    c.prepare_fpgrowth_data()

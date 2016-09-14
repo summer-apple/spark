@@ -4,7 +4,7 @@ from pyspark.mllib.fpm import FPGrowth,PrefixSpan
 from pyspark.mllib.clustering import KMeans,KMeansModel
 import math
 
-pydevd.settrace("60.191.25.130", port=8618, stdoutToServer=True, stderrToServer=True)
+#pydevd.settrace("60.191.25.130", port=8618, stdoutToServer=True, stderrToServer=True)
 
 
 
@@ -56,12 +56,11 @@ class Recommend:
         '''
 
         data = [
-            ['P1', 'P2', 'P3'],
-            ['P1', 'P2', 'P3', 'P7'],
+            ['1', '1', '2'],
+            ['2', '1', '1', '2'],
             ['P1', 'P3'],
             ['P3', 'P5', 'P4', 'P6'],
             ['P4', 'P5']
-
         ]
         rdd = self.sc.parallelize(data, 2).cache()
         model = FPGrowth.train(rdd, minSupport=0.3, numPartitions=10)
@@ -153,7 +152,7 @@ if __name__ == '__main__':
     r = Recommend()
     #r.try_k()
 
-    r.kmeans_demo()
+    r.fpgrowth()
 
 
 

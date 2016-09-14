@@ -237,6 +237,6 @@ if __name__ == '__main__':
     for t in t_list:
         print(t)
 
-    sql = "insert into t_CMMS_CREDIT_MERCODE(CODE,CATEGORY) values(%s,%s)"
+    sql = "replace into t_CMMS_CREDIT_MERCODE(CODE,CATEGORY) values(%s,%s)"
 
     mysql_helper.executemany(sql, t_list)
