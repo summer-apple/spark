@@ -17,7 +17,7 @@ except ImportError:
 class Credit:
     def __init__(self):
         self.conf = (SparkConf()
-                     .setAppName("CREDIT")
+                     .setAppName("CreditCard")
                      .set("spark.cores.max", "2")
                      .set('spark.executor.extraClassPath', '/usr/local/env/lib/mysql-connector-java-5.1.38-bin.jar'))
         self.sc = SparkContext(conf=self.conf)

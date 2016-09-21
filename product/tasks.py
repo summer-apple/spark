@@ -10,7 +10,7 @@
 '''
 
 from product.analysis import DataAnalysis
-from product.data_handler import DataHandler
+from product.band_card import DataHandler
 import datetime
 from apscheduler.schedulers.background import BlockingScheduler
 import logging
@@ -74,7 +74,7 @@ class CMMSTask:
 
     def seasonly_task(self):
         def func():
-            每个月计算前一个月的数据
+            # 每个月计算前一个月的数据
             month = datetime.datetime.now().month - 1
             year = datetime.datetime.now().year
             if month == 0:
@@ -94,7 +94,7 @@ class CMMSTask:
         def func():
             month = datetime.datetime.now().month - 1
             year = datetime.datetime.now().year
-            if month = 0:
+            if month == 0:
                 month = 12
                 year = year - 1
 

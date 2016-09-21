@@ -8,7 +8,7 @@ except ImportError:
     import sys, os
 
     sys.path.append(os.path.abspath('../'))
-    from work.mysql_helper import MySQLHelper
+    from product.mysql_helper import MySQLHelper
 
 #pydevd.settrace("60.191.25.130", port=8618, stdoutToServer=True, stderrToServer=True)
 
@@ -16,7 +16,7 @@ except ImportError:
 class DataHandler:
     def __init__(self):
         self.conf = (SparkConf()
-                     .setAppName("Summer")
+                     .setAppName("BandCard")
                      .set("spark.cores.max", "2")
                      .set('spark.executor.extraClassPath', '/usr/local/env/lib/mysql-connector-java-5.1.38-bin.jar'))
         self.sc = SparkContext(conf=self.conf)
