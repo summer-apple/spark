@@ -28,7 +28,7 @@ except ImportError:
 class CMMSTask:
     def __init__(self):
         self.mysql_helper = MySQLHelper('core', host='10.9.29.212')
-        logging.config.fileConfig('./logging.conf')
+        logging.config.fileConfig('./conf/logging.conf')
         self.logger = logging.getLogger('simpleLogger')
         self.da = DataAnalysis()
         self.dh = DataHandler()

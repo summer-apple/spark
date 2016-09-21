@@ -51,12 +51,12 @@ class MySQLHelper:
         temp = []
         for row in rdd.collect():
             if len(temp) >= once_size:
-                self.mysql_helper.executemany(sql, temp)
+                self.executemany(sql, temp)
                 temp.clear()
             temp.append(row)
 
         if len(temp) != 0:
-            self.mysql_helper.executemany(sql, temp)
+            self.executemany(sql, temp)
             temp.clear()
 
 

@@ -1,6 +1,7 @@
 import pydevd
 from pyspark import SparkContext, SparkConf, SQLContext
 from pyspark.sql.tests import Row
+
 try:
     from mysql_helper import MySQLHelper
 except ImportError:
@@ -12,7 +13,7 @@ except ImportError:
 import datetime
 
 
-#pydevd.settrace("60.191.25.130", port=8618, stdoutToServer=True, stderrToServer=True)
+# pydevd.settrace("60.191.25.130", port=8618, stdoutToServer=True, stderrToServer=True)
 
 
 
@@ -39,9 +40,8 @@ class KMData:
         rfm = loyalty.join(value, 'CUST_NO', 'left_outer').join(life_cycle, 'CUST_NO', 'left_outer').distinct() \
             .map(lambda x: (x['CUST_NO'], x['LIFE_CYC'], x['CUST_VALUE'], x['CUST_RANK'], x['LOYALTY']))
 
-
         sql = "replace into t_CMMS_TEMP_KMEANS_COLUMNS(CUST_NO,LIFE_CYC,CUST_VALUE,CUST_RANK,LOYALTY) values(%s,%s,%s,%s,%s)"
-        self.mysql_helper.batch_operate(sql,rfm)
+        self.mysql_helper.batch_operate(sql, rfm)
 
     def idcard(self):
         '''
@@ -86,7 +86,6 @@ class KMData:
 
         asl = j.map(split_map).collect()
 
-
         sql = "update t_CMMS_TEMP_KMEANS_COLUMNS set AGE = %s, SEX = %s, LOCAL = %s where CUST_NO = %s"
         self.mysql_helper.batch_operate(sql, asl)
 
@@ -103,8 +102,6 @@ class KMData:
         sql = "update t_CMMS_TEMP_KMEANS_COLUMNS set AUM = %s where CUST_NO = %s"
         self.mysql_helper.batch_operate(sql, df)
 
-
-
     def cust_info(self):
         self.rfm()
         self.idcard()
@@ -114,82 +111,87 @@ class KMData:
         ************************************************************
     '''
 
-
-
-    #TODO 时间跨度未设置
+    # TODO 时间跨度未设置
     def credit_card(self):
 
-        #清空缓存表，导入新的额度数据
+        # 清空缓存表，导入新的额度数据
         init_credit_sql = "replace into t_CMMS_TEMP_KMEANS_CREDIT(ACCTNBR,CREDIT) (select XACCOUNT,CRED_LIMIT from core.ACCT)"
         self.mysql_helper.execute('truncate t_CMMS_TEMP_KMEANS_CREDIT')
         self.mysql_helper.execute(init_credit_sql)
 
+        # 信用卡交易记录
 
-
-        #信用卡交易记录
         credit_df = self.load_from_mysql('t_CMMS_CREDIT_TRAN')
         credit_df = credit_df.filter(credit_df['BILL_AMTFLAG'] == '+').cache()
 
+        # 取现交易代码
+        codes = [2010, 2050, 2060, 2182, 2184]
 
-
-        #计算循环(此处为刷卡金额占额度的比例，不是真正的循环信用）
+        # 计算循环(此处为刷卡金额占额度的比例，不是真正的循环信用）
         # join = credit_df.groupBy('ACCTNBR').sum('BILL_AMT').join(credit_limit_df,'ACCTNBR','outer')
         #
         # cycle = join.select('ACCTNBR',join['sum(BILL_AMT)'].alias('CYCLE_AMT'),'CREDIT')
 
-        #刷卡金额与次数
-        swipe_amt = credit_df.groupBy('ACCTNBR').sum('BILL_AMT')
-        swipe_times = credit_df.groupBy('ACCTNBR').count()
+        # 刷卡金额与次数×××××××××××××××××××××××××××××××××××××××××××××××××××××××××××××××××××××××××××××××××××××××××
+
+        trans_without_cash = None
+        for c in codes:  # 去除取现的，不然就会重复计算
+            if trans_without_cash is None:
+                trans_without_cash = credit_df.filter(credit_df.TRANS_TYPE != c)
+            else:
+                trans_without_cash = trans_without_cash.filter(credit_df.TRANS_TYPE != c)
+
+        swipe_amt = trans_without_cash.groupBy('ACCTNBR').sum('BILL_AMT')
+        swipe_times = trans_without_cash.groupBy('ACCTNBR').count()
 
         # swipe_amt.show()
         # swipe_times.show()
 
-        swipe_result = swipe_amt.join(swipe_times,'ACCTNBR','outer')
+        swipe_result = swipe_amt.join(swipe_times, 'ACCTNBR', 'outer')
 
-        swipe_result = swipe_result.select('ACCTNBR',swipe_result['sum(BILL_AMT)'].alias('SWIPE_AMT'),swipe_result['count'].alias('SWIPE_TIMES'))
+        swipe_result = swipe_result.select('ACCTNBR', swipe_result['sum(BILL_AMT)'].alias('SWIPE_AMT'),
+                                           swipe_result['count'].alias('SWIPE_TIMES'))
 
+        # 取现金额与次数×××××××××××××××××××××××××××××××××××××××××××××××××××××××××××××××××××××××××××××××××××××××××
 
-
-
-
-
-        #取现金额与次数
-        codes = [2010,2050,2060,2182,2184]
         cash = credit_df.filter(credit_df['TRANS_TYPE'] == codes.pop())
         print(type(cash))
+        # 遍历取消交易的代码
+
         for c in codes:
             cash = cash.unionAll(credit_df.filter(credit_df['TRANS_TYPE'] == c))
-
 
         cash_amt = cash.groupBy('ACCTNBR').sum('BILL_AMT')
         cash_count = cash.groupBy('ACCTNBR').count()
 
-        cash_result = cash_amt.join(cash_count,'ACCTNBR','outer')
-        cash_result = cash_result.select('ACCTNBR',cash_result['sum(BILL_AMT)'].alias('CASH_AMT'),cash_result['count'].alias('CASH_TIMES'))
+        cash_result = cash_amt.join(cash_count, 'ACCTNBR', 'outer')
+        cash_result = cash_result.select('ACCTNBR', cash_result['sum(BILL_AMT)'].alias('CASH_AMT'),
+                                         cash_result['count'].alias('CASH_TIMES'))
 
-        #cash_amt.show()
-        #cash_count.show()
+        # cash_amt.show()
+        # cash_count.show()
 
 
 
 
-        #分期付款金额与次数
+        # 分期付款金额与次数×××××××××××××××××××××××××××××××××××××××××××××××××××××××××××××××××××××××××××××××××××××××××
+
         installment_df = self.load_from_mysql('MPUR_D').cache()
         im_amt = installment_df.groupBy('XACCOUNT').sum('ORIG_PURCH')
         im_times = installment_df.groupBy('XACCOUNT').count()
 
-        im_result = im_amt.join(im_times,'XACCOUNT','outer')
-        im_result = im_result.select(im_result['XACCOUNT'].alias('ACCTNBR'),im_result['sum(ORIG_PURCH)'].alias('INSTALLMENT_AMT'),im_result['count'].alias('INSTALLMENT_TIMES'))
+        im_result = im_amt.join(im_times, 'XACCOUNT', 'outer')
+        im_result = im_result.select(im_result['XACCOUNT'].alias('ACCTNBR'),
+                                     im_result['sum(ORIG_PURCH)'].alias('INSTALLMENT_AMT'),
+                                     im_result['count'].alias('INSTALLMENT_TIMES'))
 
-
-
-
-        #汇总
+        # 汇总
 
         # 加载额度数据
         credit_limit_df = self.load_from_mysql('t_CMMS_TEMP_KMEANS_CREDIT').select('ACCTNBR', 'CREDIT')
 
-        all_join = swipe_result.join(cash_result,'ACCTNBR','outer').join(im_result,'ACCTNBR','outer').join(credit_limit_df,'ACCTNBR','outer')
+        all_join = swipe_result.join(cash_result, 'ACCTNBR', 'outer').join(im_result, 'ACCTNBR', 'outer').join(
+            credit_limit_df, 'ACCTNBR', 'outer')
 
         all_join.show()
 
@@ -209,15 +211,12 @@ class KMData:
             installment_amt = line['INSTALLMENT_AMT'] if line['INSTALLMENT_AMT'] is not None else 0
             installment_times = line['INSTALLMENT_TIMES'] if line['INSTALLMENT_TIMES'] is not None else 0
 
-
-
-            return acctnbr,credit,swipe_amt,swipe_times,cash_amt,cash_times,installment_amt,installment_times
-
+            return acctnbr, credit, swipe_amt, swipe_times, cash_amt, cash_times, installment_amt, installment_times
 
         sql = "replace into t_CMMS_TEMP_KMEANS_CREDIT(ACCTNBR,CREDIT,SWIPE_AMT,SWIPE_TIMES,CASH_AMT,CASH_TIMES,INSTALLMENT_AMT,INSTALLMENT_TIMES) values(%s,%s,%s,%s,%s,%s,%s,%s)"
         df = all_join.map(m)
 
-        self.mysql_helper.batch_operate(sql,df)
+        self.mysql_helper.batch_operate(sql, df)
 
 
 if __name__ == '__main__':
