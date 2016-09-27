@@ -4,15 +4,14 @@ from pyspark.mllib.clustering import KMeans, KMeansModel
 from pyspark.mllib.linalg import Vectors
 import math
 import decimal
-
+import os
 try:
-    from mysql_helper import MySQLHelper
+    from spark_singleton import SparkEnvirnment
 except ImportError:
     import sys, os
 
     sys.path.append(os.path.abspath('../'))
-    from work.mysql_helper import MySQLHelper
-
+    from product.spark_env import SparkEnvirnment
 
 # pydevd.settrace("60.191.25.130", port=8618, stdoutToServer=True, stderrToServer=True)
 
@@ -20,19 +19,7 @@ except ImportError:
 
 class KMAnalyse:
     def __init__(self):
-        self.conf = (SparkConf()
-                     .setAppName("KMeans")
-                     .set("spark.cores.max", "2")
-                     .set('spark.executor.extraClassPath', '/usr/local/env/lib/mysql-connector-java-5.1.38-bin.jar'))
-        self.sc = SparkContext(conf=self.conf)
-        self.sqlctx = SQLContext(self.sc)
-        self.mysql_helper = MySQLHelper('core', host='10.9.29.212')
-        self.base = 'hdfs://master:9000/gmc/'
-
-    def load_from_mysql(self, table, database='core'):
-        url = "jdbc:mysql://10.9.29.212:3306/%s?user=root&characterEncoding=UTF-8" % database
-        df = self.sqlctx.read.format("jdbc").options(url=url, dbtable=table, driver="com.mysql.jdbc.Driver").load()
-        return df
+        self.spark = SparkEnvirnment(app_name='KMeans', max_cores=4)
 
     @staticmethod
     def clustering_score(data, k):
@@ -62,7 +49,7 @@ class KMAnalyse:
 
         get_id_sql = "select ID from t_CMMS_TEMP_KMEANS_RESULT order by ID desc limit 1"
         try:
-            id = int(self.mysql_helper.fetchone(get_id_sql)[0]) + 1
+            id = int(self.spark.mysql_helper.fetchone(get_id_sql)[0]) + 1
         except:
             id = 1
         columns = str(dataframe.columns)
@@ -71,7 +58,7 @@ class KMAnalyse:
             sorce = self.clustering_score(data, k)
             print(k, sorce)
             l.append(sorce)
-            self.mysql_helper.execute('insert into t_CMMS_TEMP_KMEANS_RESULT(ID,K,SORCE,COLUMNS) values(%s,%s,%s,%s)', (id, k, sorce, columns))
+            self.spark.mysql_helper.execute('insert into t_CMMS_TEMP_KMEANS_RESULT(ID,K,SORCE,COLUMNS) values(%s,%s,%s,%s)', (id, k, sorce, columns))
         return id
 
 
@@ -108,16 +95,14 @@ class KMAnalyse:
         model = KMeans.train(data, k)
 
         # create model saving path
-        path = self.base + model_name
+        path = self.spark.hdfs_base + model_name
 
         # try to delete the old model if it exists
-        try:
-            import subprocess
-            subprocess.call(["hadoop", "fs", "-rm", "-f", path])
-        except:
-            pass
+        if os.system('hadoop fs -test -e ' + path) == 0:
+            os.system('hadoop fs -rm -r ' + path)
+
         # save new model on hdfs
-        model.save(self.sc, path)
+        model.save(self.spark.sc, path)
         # print all cluster of the model
         for c in model.clusterCenters:
             l = []
@@ -140,9 +125,9 @@ class KMAnalyse:
         '''
 
         # try to load the specified model
-        path = self.base + model_name
+        path = self.spark.hdfs_base + model_name
         try:
-            model = KMeansModel.load(self.sc, path)
+            model = KMeansModel.load(self.spark.sc, path)
         except:
             raise Exception('No such model found on hdfs!')
 
@@ -179,7 +164,7 @@ class KMAnalyse:
             l.append(id)
 
         sql = "SELECT k,avg(SORCE) FROM t_CMMS_TEMP_KMEANS_RESULT  where ID in %s group by K" % str(tuple(l))
-        result = self.mysql_helper.fetchall(sql)
+        result = self.spark.mysql_helper.fetchall(sql)
         for i in result:
             print(i[0])
         print('\n')
@@ -189,9 +174,9 @@ class KMAnalyse:
 
     def print_model(self,model_name):
         # try to load the specified model
-        path = self.base + model_name
+        path = self.spark.hdfs_base + model_name
         try:
-            model = KMeansModel.load(self.sc, path)
+            model = KMeansModel.load(self.spark.sc, path)
         except:
             raise Exception('No such model found on hdfs!')
 
@@ -205,9 +190,9 @@ class KMAnalyse:
             print(l)
 
     def test_rfm_data(self):
-        life_cycle = self.load_from_mysql('t_CMMS_ANALYSE_LIFE').select('CUST_NO', 'LIFE_CYC')
-        value = self.load_from_mysql('t_CMMS_ANALYSE_VALUE').select('CUST_NO', 'CUST_VALUE')
-        loyalty = self.load_from_mysql('t_CMMS_ANALYSE_LOYALTY').select('CUST_NO', 'LOYALTY')
+        life_cycle = self.spark.load_from_mysql('t_CMMS_ANALYSE_LIFE').select('CUST_NO', 'LIFE_CYC')
+        value = self.spark.load_from_mysql('t_CMMS_ANALYSE_VALUE').select('CUST_NO', 'CUST_VALUE')
+        loyalty = self.spark.load_from_mysql('t_CMMS_ANALYSE_LOYALTY').select('CUST_NO', 'LOYALTY')
         rfm = loyalty.join(value, 'CUST_NO', 'left_outer').join(life_cycle, 'CUST_NO', 'left_outer').select('LIFE_CYC',
                                                                                                             'CUST_VALUE',
                                                                                                             'LOYALTY')
@@ -215,49 +200,114 @@ class KMAnalyse:
         return rfm
 
     def test_cust_info_data(self):
-        return self.load_from_mysql('t_CMMS_TEMP_KMEANS_COLUMNS').select('LIFE_CYC', 'LOYALTY', 'CUST_RANK', 'AGE',
+        return self.spark.load_from_mysql('t_CMMS_TEMP_KMEANS_COLUMNS').select('LIFE_CYC', 'LOYALTY', 'CUST_RANK', 'AGE',
                                                                          'LOCAL', 'SEX', 'AUM')
 
     def test_credit_data(self):
-        return self.load_from_mysql('t_CMMS_TEMP_KMEANS_CREDIT').select('CREDIT', 'CYCLE_TIMES', 'CYCLE_AMT',
+        return self.spark.load_from_mysql('t_CMMS_CREDIT_STAT').select('CREDIT', 'CYCLE_TIMES', 'CYCLE_AMT',
                                                                         'INSTALLMENT_TIMES', 'INSTALLMENT_AMT',
                                                                         'SWIPE_TIMES', 'SWIPE_AMT', 'CASH_TIMES',
                                                                         'CASH_AMT')
 
     def full_keys_data(self):
-        return self.load_from_mysql('t_CMMS_TEMP_KMEANS_CREDIT').select('CREDIT', 'CYCLE_TIMES', 'CYCLE_AMT', 'CYCLE_RATE',
+        return self.spark.load_from_mysql('t_CMMS_CREDIT_STAT').select('CREDIT', 'CYCLE_TIMES', 'CYCLE_AMT', 'CYCLE_RATE',
                                                                         'INSTALLMENT_TIMES', 'INSTALLMENT_AMT',
                                                                         'SWIPE_TIMES', 'SWIPE_AMT', 'CASH_TIMES',
                                                                         'CASH_AMT')
 
+    def full_keys_data_credit_less_than_10000(self):
+        return self.spark.load_from_mysql('t_CMMS_CREDIT_STAT').filter('CREDIT <= 10000').select('CREDIT', 'CYCLE_TIMES', 'CYCLE_AMT', 'CYCLE_RATE',
+                                                                 'INSTALLMENT_TIMES', 'INSTALLMENT_AMT',
+                                                                 'SWIPE_TIMES', 'SWIPE_AMT', 'CASH_TIMES',
+                                                                 'CASH_AMT')
+
+    def full_keys_data_credit_less_10000_20000(self):
+        return self.spark.load_from_mysql('t_CMMS_CREDIT_STAT').filter('CREDIT >= 10000').filter('CREDIT < 20000').select('CREDIT', 'CYCLE_TIMES',
+                                                                                                'CYCLE_AMT',
+                                                                                                'CYCLE_RATE',
+                                                                                                'INSTALLMENT_TIMES',
+                                                                                                'INSTALLMENT_AMT',
+                                                                                                'SWIPE_TIMES',
+                                                                                                'SWIPE_AMT',
+                                                                                                'CASH_TIMES',
+                                                                                                'CASH_AMT')
+
+    def full_keys_data_credit_more_than_20000(self):
+        return self.spark.load_from_mysql('t_CMMS_CREDIT_STAT').filter('CREDIT >= 20000').select('CREDIT', 'CYCLE_TIMES',
+                                                                                                'CYCLE_AMT',
+                                                                                                'CYCLE_RATE',
+                                                                                                'INSTALLMENT_TIMES',
+                                                                                                'INSTALLMENT_AMT',
+                                                                                                'SWIPE_TIMES',
+                                                                                                'SWIPE_AMT',
+                                                                                                'CASH_TIMES',
+                                                                                                'CASH_AMT')
 
     def no_cycle_data(self):
-        return self.load_from_mysql('t_CMMS_TEMP_KMEANS_CREDIT').select('CREDIT',
+        return self.spark.spark.load_from_mysql('t_CMMS_CREDIT_STAT').select('CREDIT',
                                                                         'INSTALLMENT_TIMES', 'INSTALLMENT_AMT',
                                                                         'SWIPE_TIMES', 'SWIPE_AMT', 'CASH_TIMES',
                                                                         'CASH_AMT')
     def no_amt_data(self):
-        return self.load_from_mysql('t_CMMS_TEMP_KMEANS_CREDIT').select('CREDIT', 'CYCLE_TIMES',
+        return self.spark.load_from_mysql('t_CMMS_CREDIT_STAT').select('CREDIT', 'CYCLE_TIMES',
                                                                         'CYCLE_RATE',
                                                                         'INSTALLMENT_TIMES',
                                                                         'SWIPE_TIMES',  'CASH_TIMES')
 
     def no_cycle_amt(self):
-        return self.load_from_mysql('t_CMMS_TEMP_KMEANS_CREDIT').select('CREDIT', 'CYCLE_TIMES',
+        return self.spark.load_from_mysql('t_CMMS_CREDIT_STAT').select('CREDIT', 'CYCLE_TIMES',
                                                                         'CYCLE_RATE',
                                                                         'INSTALLMENT_TIMES', 'INSTALLMENT_AMT',
                                                                         'SWIPE_TIMES', 'SWIPE_AMT', 'CASH_TIMES',
                                                                         'CASH_AMT')
 
+    def only_swipe(self):
+        return self.spark.load_from_mysql('t_CMMS_CREDIT_STAT').select('CYCLE_TIMES',
+                                                                 'CYCLE_RATE',
+                                                                 'INSTALLMENT_TIMES',
+                                                                 'SWIPE_TIMES', 'SWIPE_AMT', 'CASH_TIMES')
+
+    def no_zero_data(self):
+        return self.spark.load_from_mysql('t_CMMS_CREDIT_STAT').filter('CYCLE_TIMES = 0 and INSTALLMENT_TIMES = 0 and SWIPE_TIMES = 0 and CASH_TIMES = 0')
+
+
+    def full_key(self):
+        return self.spark.load_from_mysql('t_CMMS_CREDIT_STAT').filter('CREDIT > 5000').filter('CREDIT <= 10000').subtract(self.no_zero_data()).select('CREDIT', 'CYCLE_TIMES',
+                                                                                                'CYCLE_AMT',
+                                                                                                'CYCLE_RATE',
+                                                                                                'INSTALLMENT_TIMES',
+                                                                                                'INSTALLMENT_AMT',
+                                                                                                'SWIPE_TIMES',
+                                                                                                'SWIPE_AMT',
+                                                                                                'CASH_TIMES',
+                                                                                                'CASH_AMT')
+
+    def full_key(self,min,max):
+        return self.spark.load_from_mysql('t_CMMS_CREDIT_STAT').filter('CREDIT > '+str(min)).filter('CREDIT <= '+str(max)).subtract(self.no_zero_data()).select('CREDIT', 'CYCLE_TIMES',
+                                                                                                'CYCLE_AMT',
+                                                                                                'CYCLE_RATE',
+                                                                                                'INSTALLMENT_TIMES',
+                                                                                                'INSTALLMENT_AMT',
+                                                                                                'SWIPE_TIMES',
+                                                                                                'SWIPE_AMT',
+                                                                                                'CASH_TIMES',
+                                                                                                'CASH_AMT')
 
 if __name__ == '__main__':
     kma = KMAnalyse()
-    #df = kma.no_cycle_amt()
+    df = kma.full_key(1000,20000)
+    #kma.find_best_k(df,10,max_k=10)
 
-    # kma.find_best_k(df,10,max_k=15)
-    #kma.train_model(df, 7, 'aaa')
-    #kma.train_model(df, 8, 'aa')
-    # kma.train_model(df, 7, 'credit_no_amt_k8')
+
+    kma.train_model(df, 7, 'full_keys_data')
+
+    # print()
+    # kma.train_model(df, 8, 'full_keys_data')
+    # print()
+    # kma.train_model(df, 9, 'full_keys_data')
+    # print()
+    # kma.train_model(df, 10, 'full_keys_data')
+
     # kma.predict('all_col_kmeans_k4',[1, 2, 2,27,330621,1,20000])
 
 

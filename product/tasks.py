@@ -9,7 +9,7 @@
 
 '''
 
-from product.analysis import DataAnalysis
+from product.jj_analysis import DataAnalysis
 from product.band_card import DataHandler
 import datetime
 from apscheduler.schedulers.background import BlockingScheduler
