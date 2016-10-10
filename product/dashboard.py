@@ -1,7 +1,7 @@
 import json
 
 try:
-    from spark_singleton import SparkEnvirnment
+    from spark_env import SparkEnvirnment
 except ImportError:
     import sys, os
 
@@ -108,7 +108,7 @@ class Dashboard:
         # TODO 明确具体要统计的信息
 
 
-    def
+
 
 
 

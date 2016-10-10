@@ -1,42 +1,20 @@
 import pydevd
-from pyspark import SparkContext, SparkConf, SQLContext
 from pyspark.sql.types import Row
 from pyspark.mllib.fpm import FPGrowth
-from pyspark.sql import DataFrameWriter
-
+import datetime
 try:
-    from mysql_helper import MySQLHelper
+    from spark_env import SparkEnvirnment
 except ImportError:
     import sys, os
 
     sys.path.append(os.path.abspath('../'))
-    from product.mysql_helper import MySQLHelper
+    from product.spark_env import SparkEnvirnment
 
 #pydevd.settrace("60.191.25.130", port=8618, stdoutToServer=True, stderrToServer=True)
 
 class Credit:
     def __init__(self):
-        self.conf = (SparkConf()
-                     .setAppName("CreditCard")
-                     .set("spark.cores.max", "2")
-                     .set('spark.executor.extraClassPath', '/usr/local/env/lib/mysql-connector-java-5.1.38-bin.jar'))
-        self.sc = SparkContext(conf=self.conf)
-        self.sqlctx = SQLContext(self.sc)
-
-
-        self.mysql_helper = MySQLHelper('core', host='10.9.29.212')
-        self.base = 'hdfs://master:9000/gmc/'
-
-    def load_from_mysql(self, table, database='core'):
-        url = "jdbc:mysql://10.9.29.212:3306/%s?user=root&characterEncoding=UTF-8" % database
-        df = self.sqlctx.read.format("jdbc").options(url=url, dbtable=table, driver="com.mysql.jdbc.Driver").load()
-        return df
-
-
-
-
-
-
+        self.spark = SparkEnvirnment(app_name='CreditCard', max_cores=2)
 
     def fpgrowth(self):
         '''
@@ -44,7 +22,7 @@ class Credit:
         :return:
         '''
 
-        tran_df = self.load_from_mysql('t_CMMS_CREDIT_TRAN').filter("BILL_AMTFLAG = '+'").select('ACCTNBR',
+        tran_df = self.spark.load_from_mysql('t_CMMS_CREDIT_TRAN').filter("BILL_AMTFLAG = '+'").select('ACCTNBR',
                                                                                                  'MER_CAT_CD') \
             .filter("MER_CAT_CD != 0").filter("MER_CAT_CD != 6013")
 
@@ -96,13 +74,13 @@ class Credit:
 
         # 清空缓存表，导入新的额度数据
         init_credit_sql = "replace into t_CMMS_CREDIT_STAT(ACCTNBR,CREDIT) (select XACCOUNT,CRED_LIMIT from core.ACCT)"
-        self.mysql_helper.execute('truncate t_CMMS_CREDIT_STAT')
-        self.mysql_helper.execute(init_credit_sql)
+        self.spark.mysql_helper.execute('truncate t_CMMS_CREDIT_STAT')
+        self.spark.mysql_helper.execute(init_credit_sql)
 
 
 
         # 信用卡交易记录
-        credit_df_orign = self.load_from_mysql('t_CMMS_CREDIT_TRAN')
+        credit_df_orign = self.spark.load_from_mysql('t_CMMS_CREDIT_TRAN')
         credit_df_orign = credit_df_orign.filter(credit_df_orign['BILL_AMTFLAG'] == '+').cache()
 
 
@@ -172,7 +150,7 @@ class Credit:
 
         # 分期付款金额与次数×××××××××××××××××××××××××××××××××××××××××××××××××××××××××××××××××××××××××××××××××××××××××
 
-        installment_df = self.load_from_mysql('MPUR_D').cache()
+        installment_df = self.spark.load_from_mysql('MPUR_D').cache()
         im_amt = installment_df.groupBy('XACCOUNT').sum('ORIG_PURCH')
         im_times = installment_df.groupBy('XACCOUNT').count()
 
@@ -184,7 +162,7 @@ class Credit:
         # 汇总
 
         # 加载额度数据
-        credit_limit_df = self.load_from_mysql('t_CMMS_CREDIT_STAT').select('ACCTNBR', 'CREDIT')
+        credit_limit_df = self.spark.load_from_mysql('t_CMMS_CREDIT_STAT').select('ACCTNBR', 'CREDIT')
 
         all_join = swipe_result.join(cash_result, 'ACCTNBR', 'outer').join(im_result, 'ACCTNBR', 'outer').join(
             credit_limit_df, 'ACCTNBR', 'outer')
@@ -212,7 +190,7 @@ class Credit:
         sql = "replace into t_CMMS_CREDIT_STAT(ACCTNBR,CREDIT,SWIPE_AMT,SWIPE_TIMES,CASH_AMT,CASH_TIMES,INSTALLMENT_AMT,INSTALLMENT_TIMES) values(%s,%s,%s,%s,%s,%s,%s,%s)"
         df = all_join.map(m)
 
-        self.mysql_helper.batch_operate(sql, df)
+        self.spark.mysql_helper.batch_operate(sql, df)
 
 
 
@@ -227,7 +205,7 @@ class Credit:
 
         print('---------------------------信用卡-Start--------------------------')
         # 交易流水 还款
-        credit_tran_df_orign = self.load_from_mysql('t_CMMS_CREDIT_TRAN').select('ACCTNBR', 'MONTH_NBR', 'BILL_AMT',
+        credit_tran_df_orign = self.spark.load_from_mysql('t_CMMS_CREDIT_TRAN').select('ACCTNBR', 'MONTH_NBR', 'BILL_AMT',
                                                                            'BILL_AMTFLAG').filter("BILL_AMTFLAG ='-'").cache()
 
         month = 6 if half_year == 0 else 12
@@ -244,7 +222,7 @@ class Credit:
 
 
         # 卡账户信息
-        credit_acct_df = self.load_from_mysql('ACCT_D').select('ACCTNBR', 'MONTH_NBR', 'STM_MINDUE')
+        credit_acct_df = self.spark.load_from_mysql('ACCT_D').select('ACCTNBR', 'MONTH_NBR', 'STM_MINDUE')
 
         # 还款计算
         return_amt = credit_tran_df.groupBy('ACCTNBR', 'MONTH_NBR').sum('BILL_AMT')
@@ -334,11 +312,11 @@ class Credit:
         rdd = rate.map(m)
 
         print('将数据更新至数据库...')
-        self.mysql_helper.batch_operate(sql,rdd)
+        self.spark.mysql_helper.batch_operate(sql,rdd)
 
         # 将未进入循环的 设为0
         print('将未进入循环的 设为0...')
-        self.mysql_helper.execute(
+        self.spark.mysql_helper.execute(
             "update t_CMMS_CREDIT_STAT set CYCLE_TIMES=0,CYCLE_AMT=0,CYCLE_RATE=0 where CYCLE_TIMES is null ")
 
 
@@ -358,7 +336,7 @@ class Credit:
 
 
         # 交易流水
-        credit_tran_df = self.load_from_mysql('t_CMMS_CREDIT_TRAN').select('ACCTNBR', 'INP_DATE', 'MONTH_NBR', 'BILL_AMT',
+        credit_tran_df = self.spark.load_from_mysql('t_CMMS_CREDIT_TRAN').select('ACCTNBR', 'INP_DATE', 'MONTH_NBR', 'BILL_AMT',
                                                                            'BILL_AMTFLAG').filter("BILL_AMTFLAG ='+'").cache()
 
 
@@ -472,7 +450,7 @@ class Credit:
         rdd = join.map(m)
         print(type(rdd))
 
-        self.mysql_helper.batch_operate(sql,rdd)
+        self.spark.mysql_helper.batch_operate(sql,rdd)
 
 
     def get_monthnbr(self, year, month):
@@ -487,7 +465,7 @@ class Credit:
             sql = "select MONTH_NBR from t_CMMS_CREDIT_TRAN where INP_DATE = %s limit 1"
 
             try:
-                month_nbr = self.mysql_helper.fetchone(sql, (date,))
+                month_nbr = self.spark.mysql_helper.fetchone(sql, (date,))
                 if month_nbr is None:
                     continue
                 else:
@@ -514,7 +492,7 @@ class Credit:
         half_year_data = None
 
         # 交易流水 仅含消费 不含还款
-        credit_tran_df = self.load_from_mysql('t_CMMS_CREDIT_TRAN').select('ACCTNBR', 'INP_DATE', 'MONTH_NBR',
+        credit_tran_df = self.spark.load_from_mysql('t_CMMS_CREDIT_TRAN').select('ACCTNBR', 'INP_DATE', 'MONTH_NBR',
                                                                            'BILL_AMT',
                                                                            'BILL_AMTFLAG').filter("BILL_AMTFLAG ='+'").cache()
 
@@ -562,7 +540,7 @@ class Credit:
 
         rdd = half_year_data_count.map(m)
 
-        self.mysql_helper.batch_operate(sql,rdd)
+        self.spark.mysql_helper.batch_operate(sql,rdd)
 
 
     def credit_value(self):
@@ -574,7 +552,7 @@ class Credit:
         cash_rate = 2
 
         # 获取信用卡统计的相关数据，筛选出金额字段
-        credit_stat_df = self.load_from_mysql('t_CMMS_CREDIT_STAT').select('ACCTNBR','CYCLE_AMT','INSTALLMENT_AMT','SWIPE_AMT','CASH_AMT')
+        credit_stat_df = self.spark.load_from_mysql('t_CMMS_CREDIT_STAT').select('ACCTNBR','CYCLE_AMT','INSTALLMENT_AMT','SWIPE_AMT','CASH_AMT')
 
         # 计算贡献度
         credit_stat_df = credit_stat_df.select('ACCTNBR',(credit_stat_df['CYCLE_AMT'] * cycle_rate +
@@ -607,12 +585,76 @@ class Credit:
         rdd = credit_stat_df.map(m)
         sql = "replace into t_CMMS_CREDIT_VALUE(ACCTNBR,POINT,CUST_VALUE,UPDATE_TIME) values(%s,%s,%s,now())"
 
-        self.mysql_helper.batch_operate(sql,rdd)
+        self.spark.mysql_helper.batch_operate(sql,rdd)
+
+
+
+
+
+
+
+
+    def init_cust_info(self):
+
+        credit_stat_df = self.spark.load_from_mysql('t_CMMS_CREDIT_STAT')
+        acct_df = self.spark.load_from_mysql('ACCT').withColumnRenamed('XACCOUNT','ACCTNBR').select('ACCTNBR', 'ACC_NAME1', 'CUSTR_NBR')
+        life_df = self.spark.load_from_mysql('t_CMMS_CREDIT_LIFE').select('ACCTNBR','LIFE')
+        loyalty_df = self.spark.load_from_mysql('t_CMMS_CREDIT_LOYALTY').select('ACCTNBR', 'LOYALTY')
+        value_df = self.spark.load_from_mysql('t_CMMS_CREDIT_VALUE').select('ACCTNBR', 'CUST_VALUE')
+
+        j = credit_stat_df.join(acct_df, 'ACCTNBR', 'left_outer')\
+                            .join(life_df,'ACCTNBR','left_outer')\
+                            .join(loyalty_df,'ACCTNBR','left_outer')\
+                            .join(value_df,'ACCTNBR','left_outer')
+
+        year_now = datetime.datetime.now().year
+        def m(line):
+
+            id = line['CUSTR_NBR']
+            if id is not None:
+                id = id.strip()
+
+
+            if id is not None and len(id) == 18:
+                id = id.strip()
+                year = id[6:10]
+
+                age = year_now - int(year)
+                if age > 100:
+                    age = 0
+
+
+
+                sex_flag = id[-2]
+                # 1 man   0 woman
+                sex = int(sex_flag) % 2
+
+
+
+                local = id[:6]
+
+                return age, sex, local, line['ACCTNBR'],line['ACC_NAME1'],line['CUSTR_NBR'],\
+                       line['CREDIT'],line['LOYALTY'],line['CUST_VALUE'],line['LIFE'],line['CYCLE_TIMES'],line['CYCLE_AMT'], \
+                       line['CYCLE_RATE'],line['INSTALLMENT_TIMES'],line['INSTALLMENT_AMT'],line['SWIPE_TIMES'],line['SWIPE_AMT'],line['CASH_TIMES'],line['CASH_AMT']
+
+
+            else:
+                return 0, 2, '000000', line['ACCTNBR'],line['ACC_NAME1'],line['CUSTR_NBR'],\
+                       line['CREDIT'],line['LOYALTY'],line['CUST_VALUE'],line['LIFE'],line['CYCLE_TIMES'],line['CYCLE_AMT'], \
+                       line['CYCLE_RATE'],line['INSTALLMENT_TIMES'],line['INSTALLMENT_AMT'],line['SWIPE_TIMES'],line['SWIPE_AMT'],line['CASH_TIMES'],line['CASH_AMT']
+
+        sql = "replace into t_CMMS_CREDIT_USERINFO(AGE,SEX,LOCAL,ACCTNBR,NAME,CUSTR_NBR,CREDIT,LOYALTY,CUST_VALUE,LIFE," \
+              "CYCLE_TIMES,CYCLE_AMT,CYCLE_RATE,INSTALLMENT_TIMES,INSTALLMENT_AMT,SWIPE_TIMES,SWIPE_AMT,CASH_TIMES,CASH_AMT,UPDATE_TIME) " \
+              "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,now())"
+
+        rdd = j.map(m)
+        print(rdd.first())
+        self.spark.mysql_helper.batch_operate(sql,rdd)
 
 
 
     def demo(self):
-        df = self.load_from_mysql('t_CMMS_CREDIT_LIFE').select('ACCTNBR','MONTH_NBR')
+        df = self.spark.load_from_mysql('t_CMMS_CREDIT_LIFE').select('ACCTNBR','MONTH_NBR')
         df2= df
 
         df.join(df2,'ACCTNBR')
@@ -631,4 +673,5 @@ if __name__ == '__main__':
     #c.cycle_credit(2016,0)
 
 
-    c.credit_value()
+    #c.credit_value()
+    c.init_cust_info()

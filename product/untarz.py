@@ -8,8 +8,8 @@ import logging.config
 
 class Untarz:
     def __init__(self):
-        self.input_path = '/media/summer/1TB/pj_data'
-        self.output_path = '/media/summer/1TB/pj_data_untarz'
+        self.input_path = '/home/summer/Documents/Lanxi/2016.10/pujan_data_2_8'
+        self.output_path = '/media/summer/1TB/pj_data_all_untarz'
         logging.config.fileConfig('./conf/logging.conf')
         self.logger = logging.getLogger('simpleLogger')
 
