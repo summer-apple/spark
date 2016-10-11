@@ -614,7 +614,7 @@ class Credit:
             if id is not None:
                 id = id.strip()
 
-
+啥啥啥
             if id is not None and len(id) == 18:
                 id = id.strip()
                 year = id[6:10]
